@@ -1,0 +1,6 @@
+{
+  "name": "ZenDraw - Minimalist Vector Whiteboard",
+  "description": "A minimalist, dark-mode compatible whiteboard where every drawing, stroke, shape, and text element is an independently selectable and moveable object with undo/redo and custom tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
