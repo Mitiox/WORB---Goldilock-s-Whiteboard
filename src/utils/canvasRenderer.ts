@@ -6,6 +6,7 @@ import {
   WhiteboardElement,
 } from '../types/whiteboard';
 import { getCombinedBoundingBox, getElementBoundingBox, getHandlePositions } from './math';
+import { AlignmentGuide } from './alignment';
 
 export interface RenderOptions {
   elements: WhiteboardElement[];
@@ -16,6 +17,9 @@ export interface RenderOptions {
   gridType: 'dots' | 'grid' | 'none';
   currentDraft?: WhiteboardElement | null;
   selectionBox?: BoundingBox | null;
+  alignmentGuides?: AlignmentGuide[];
+  lassoPoints?: Point[] | null;
+  editingId?: string | null;
 }
 
 export function renderWhiteboard(
@@ -33,6 +37,9 @@ export function renderWhiteboard(
     gridType,
     currentDraft,
     selectionBox,
+    alignmentGuides,
+    lassoPoints,
+    editingId,
   } = options;
 
   ctx.save();
@@ -53,9 +60,39 @@ export function renderWhiteboard(
   ctx.translate(viewport.x, viewport.y);
   ctx.scale(viewport.zoom, viewport.zoom);
 
+  // Visible viewport bounding box in canvas coordinates for frustum culling
+  const cullMargin = 50 / viewport.zoom;
+  const viewMinX = -viewport.x / viewport.zoom - cullMargin;
+  const viewMinY = -viewport.y / viewport.zoom - cullMargin;
+  const viewMaxX = (width - viewport.x) / viewport.zoom + cullMargin;
+  const viewMaxY = (height - viewport.y) / viewport.zoom + cullMargin;
+
   // 4. Render all persistent elements sorted by zIndex
   const sortedElements = [...elements].sort((a, b) => a.zIndex - b.zIndex);
   for (const el of sortedElements) {
+    if (editingId && el.id === editingId) {
+      if (el.type === 'text') {
+        // Skip rendering text on canvas while editing so it doesn't double-render
+        continue;
+      }
+      if (el.type === 'note') {
+        // Render note card background and fold, but skip rendering text
+        renderNote(ctx, { ...el, text: '' }, isDark);
+        continue;
+      }
+    }
+
+    // Frustum culling: skip rendering if element is off-screen
+    const box = getElementBoundingBox(el);
+    if (
+      box.maxX < viewMinX ||
+      box.minX > viewMaxX ||
+      box.maxY < viewMinY ||
+      box.minY > viewMaxY
+    ) {
+      continue;
+    }
+
     const isHovered = hoveredId === el.id && !selectedIds.has(el.id);
     renderElement(ctx, el, isDark, isHovered);
   }
@@ -66,7 +103,9 @@ export function renderWhiteboard(
   }
 
   // 6. Render Selection Outlines & Handles
-  const selectedElements = elements.filter((el) => selectedIds.has(el.id));
+  const selectedElements = elements.filter(
+    (el) => selectedIds.has(el.id) && el.id !== editingId
+  );
   if (selectedElements.length > 0) {
     renderSelectionUI(ctx, selectedElements, isDark, viewport.zoom);
   }
@@ -74,6 +113,16 @@ export function renderWhiteboard(
   // 7. Render Drag Selection Marquee (if user is dragging a selection box)
   if (selectionBox) {
     drawMarqueeBox(ctx, selectionBox, isDark, viewport.zoom);
+  }
+
+  // 8. Render Smart Alignment Guides (while moving objects)
+  if (alignmentGuides && alignmentGuides.length > 0) {
+    drawAlignmentGuides(ctx, alignmentGuides, isDark, viewport.zoom);
+  }
+
+  // 9. Render Lasso Selection Polygon (if user is drawing lasso)
+  if (lassoPoints && lassoPoints.length > 1) {
+    drawLasso(ctx, lassoPoints, isDark, viewport.zoom);
   }
 
   ctx.restore(); // Restore Viewport transform
@@ -102,19 +151,20 @@ function drawGrid(
   const offsetY = viewport.y % scaledSpacing;
 
   if (gridType === 'dots') {
-    const dotColor = isDark ? 'rgba(255, 255, 255, 0.09)' : 'rgba(15, 23, 42, 0.11)';
+    const dotColor = isDark ? 'rgba(255, 255, 255, 0.22)' : 'rgba(15, 23, 42, 0.22)';
     ctx.fillStyle = dotColor;
-    const dotRadius = Math.max(1, Math.min(2, 1.2 * viewport.zoom));
+    const dotRadius = Math.max(1.2, Math.min(2.5, 1.4 * viewport.zoom));
 
+    ctx.beginPath();
     for (let x = offsetX; x < width; x += scaledSpacing) {
       for (let y = offsetY; y < height; y += scaledSpacing) {
-        ctx.beginPath();
+        ctx.moveTo(x + dotRadius, y);
         ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
       }
     }
+    ctx.fill();
   } else if (gridType === 'grid') {
-    const lineColor = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(15, 23, 42, 0.05)';
+    const lineColor = isDark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(15, 23, 42, 0.14)';
     ctx.strokeStyle = lineColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -222,12 +272,13 @@ function renderStroke(
 function renderText(
   ctx: CanvasRenderingContext2D,
   el: Extract<WhiteboardElement, { type: 'text' }>,
-  _isDark: boolean
+  isDark: boolean
 ) {
   if (!el.text) return;
   ctx.save();
   ctx.font = `${el.fontSize}px 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif`;
-  ctx.fillStyle = el.color;
+
+  ctx.fillStyle = el.color || (isDark ? '#ffffff' : '#000000');
   ctx.textBaseline = 'top';
 
   const lines = el.text.split('\n');
@@ -481,5 +532,78 @@ function drawMarqueeBox(
 
   ctx.fillRect(box.minX, box.minY, box.width, box.height);
   ctx.strokeRect(box.minX, box.minY, box.width, box.height);
+  ctx.restore();
+}
+
+function drawAlignmentGuides(
+  ctx: CanvasRenderingContext2D,
+  guides: AlignmentGuide[],
+  isDark: boolean,
+  zoom: number
+) {
+  if (!guides || guides.length === 0) return;
+
+  ctx.save();
+  const guideColor = isDark ? '#f43f5e' : '#e11d48'; // Vibrant rose magenta
+  ctx.strokeStyle = guideColor;
+  ctx.lineWidth = 1 / zoom;
+  ctx.setLineDash([4 / zoom, 3 / zoom]);
+
+  for (const g of guides) {
+    ctx.beginPath();
+    if (g.type === 'vertical') {
+      ctx.moveTo(g.coordinate, g.start);
+      ctx.lineTo(g.coordinate, g.end);
+    } else {
+      ctx.moveTo(g.start, g.coordinate);
+      ctx.lineTo(g.end, g.coordinate);
+    }
+    ctx.stroke();
+
+    // Draw endpoint diamond/circle markers
+    ctx.fillStyle = guideColor;
+    const r = 2.5 / zoom;
+    if (g.type === 'vertical') {
+      ctx.beginPath();
+      ctx.arc(g.coordinate, g.start, r, 0, Math.PI * 2);
+      ctx.arc(g.coordinate, g.end, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.arc(g.start, g.coordinate, r, 0, Math.PI * 2);
+      ctx.arc(g.end, g.coordinate, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawLasso(
+  ctx: CanvasRenderingContext2D,
+  points: Point[],
+  isDark: boolean,
+  zoom: number
+) {
+  if (!points || points.length < 2) return;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+
+  // Translucent fill
+  ctx.fillStyle = isDark ? 'rgba(99, 102, 241, 0.14)' : 'rgba(99, 102, 241, 0.09)';
+  ctx.fill();
+
+  // Crisp dashed outline
+  ctx.strokeStyle = isDark ? '#a5b4fc' : '#6366f1';
+  ctx.lineWidth = 1.4 / zoom;
+  ctx.setLineDash([4 / zoom, 3 / zoom]);
+  ctx.stroke();
+
   ctx.restore();
 }

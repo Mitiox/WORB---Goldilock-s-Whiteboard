@@ -17,6 +17,7 @@ import {
   getElementBoundingBox,
   getHandleAtPoint,
   isElementInBox,
+  isElementInLasso,
   isPointInElement,
   moveElement,
   resizeElement,
@@ -28,77 +29,9 @@ import { TopHeader } from './components/TopHeader';
 import { Toolbar } from './components/Toolbar';
 import { PropertiesBar } from './components/PropertiesBar';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { WhatsNewModal, CURRENT_APP_VERSION } from './components/WhatsNewModal';
+import { AlignmentGuide, calculateAlignmentSnap } from './utils/alignment';
 import { EditingState, InlineTextEditor } from './components/InlineTextEditor';
-import { Hand, MousePointer } from 'lucide-react';
-
-const INITIAL_SAMPLE_ELEMENTS: WhiteboardElement[] = [
-  {
-    id: 'sample-rect-1',
-    type: 'shape',
-    shapeType: 'rectangle',
-    x: 180,
-    y: 120,
-    width: 320,
-    height: 180,
-    strokeColor: '#6366f1',
-    fillColor: 'transparent',
-    strokeWidth: 2,
-    strokeStyle: 'solid',
-    zIndex: 1,
-  },
-  {
-    id: 'sample-text-1',
-    type: 'text',
-    x: 210,
-    y: 155,
-    text: 'Moveable Vector Whiteboard\nSelect tool (1) lets you move any element!',
-    fontSize: 20,
-    color: '#6366f1',
-    width: 260,
-    height: 60,
-    zIndex: 2,
-  },
-  {
-    id: 'sample-stroke-1',
-    type: 'stroke',
-    color: '#10b981',
-    size: 4,
-    points: [
-      { x: 210, y: 240 },
-      { x: 250, y: 255 },
-      { x: 300, y: 245 },
-      { x: 360, y: 260 },
-      { x: 420, y: 245 },
-      { x: 460, y: 255 },
-    ],
-    zIndex: 3,
-  },
-  {
-    id: 'sample-note-1',
-    type: 'note',
-    x: 540,
-    y: 120,
-    width: 220,
-    height: 180,
-    text: 'Every drawing or stroke you sketch can be moved individually.\n\nTry selecting the green stroke on the left and dragging it!',
-    color: '#fef08a',
-    textColor: '#1e293b',
-    fontSize: 15,
-    zIndex: 4,
-  },
-  {
-    id: 'sample-arrow-1',
-    type: 'shape',
-    shapeType: 'arrow',
-    x: 510,
-    y: 210,
-    width: -70,
-    height: 30,
-    strokeColor: '#f59e0b',
-    strokeWidth: 3,
-    zIndex: 5,
-  }
-];
 
 export default function App() {
   // Theme state
@@ -112,14 +45,23 @@ export default function App() {
     }
   });
 
-  // Sync theme class to document
+  // Separate color choices for different tools
+  const [penColor, setPenColor] = useState<string>(isDark ? '#f8fafc' : '#0f172a');
+  const [noteBgColor, setNoteBgColor] = useState<string>('#fef08a');
+  const [textColor, setTextColor] = useState<string>(isDark ? '#ffffff' : '#000000');
+
+  // Sync theme class to document & adjust defaults if matching previous default
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('zendraw_theme', 'dark');
+      setPenColor((prev) => (prev === '#0f172a' ? '#f8fafc' : prev));
+      setTextColor((prev) => (prev === '#000000' ? '#ffffff' : prev));
     } else {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('zendraw_theme', 'light');
+      setPenColor((prev) => (prev === '#f8fafc' ? '#0f172a' : prev));
+      setTextColor((prev) => (prev === '#ffffff' ? '#000000' : prev));
     }
   }, [isDark]);
 
@@ -130,7 +72,7 @@ export default function App() {
   // Tools & properties
   const [currentTool, setCurrentTool] = useState<ToolType>('select');
   const [penSize, setPenSize] = useState<number>(4);
-  const [currentColor, setCurrentColor] = useState<string>(isDark ? '#f8fafc' : '#0f172a');
+  const [fontSize, setFontSize] = useState<number>(20);
   const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>('solid');
   const [fillColor, setFillColor] = useState<string>('transparent');
 
@@ -144,24 +86,44 @@ export default function App() {
     canUndo,
     canRedo,
     clearBoard,
-  } = useWhiteboardHistory(INITIAL_SAMPLE_ELEMENTS);
+  } = useWhiteboardHistory([]);
 
   // Selection & interaction state
+  const [activeShape, setActiveShape] = useState<ToolType>('rectangle');
+  const [isShapeMenuOpen, setIsShapeMenuOpen] = useState<boolean>(false);
+  const [highlightedShapeIndex, setHighlightedShapeIndex] = useState<number>(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [currentDraft, setCurrentDraft] = useState<WhiteboardElement | null>(null);
   const [selectionBox, setSelectionBox] = useState<BoundingBox | null>(null);
   const [editingState, setEditingState] = useState<EditingState | null>(null);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState<boolean>(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState<boolean>(false);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const [lassoPoints, setLassoPoints] = useState<Point[] | null>(null);
+
+  // Automatically show What's New modal once after every update
+  useEffect(() => {
+    try {
+      const lastSeen = localStorage.getItem('worb_last_seen_version');
+      if (lastSeen !== CURRENT_APP_VERSION) {
+        setWhatsNewOpen(true);
+      }
+    } catch {
+      // Fallback if localStorage is disabled in iframe
+    }
+  }, []);
 
   // Interaction tracking refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isPointerDownRef = useRef(false);
   const isSpacePressedRef = useRef(false);
-  const interactionModeRef = useRef<'none' | 'drawing' | 'moving' | 'resizing' | 'marquee' | 'panning' | 'erasing'>('none');
+  const key5HoldTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const key5IsPressedRef = useRef(false);
+  const key5HeldLongEnoughRef = useRef(false);
+  const interactionModeRef = useRef<'none' | 'drawing' | 'moving' | 'resizing' | 'marquee' | 'panning' | 'erasing' | 'lasso'>('none');
   const dragStartCanvasPosRef = useRef<Point>({ x: 0, y: 0 });
   const dragStartScreenPosRef = useRef<Point>({ x: 0, y: 0 });
-  const lastCanvasPosRef = useRef<Point>({ x: 0, y: 0 });
   const activeResizeHandleRef = useRef<ResizeHandle | null>(null);
   const initialElementsSnapshotRef = useRef<WhiteboardElement[]>([]);
   const hasMovedRef = useRef<boolean>(false);
@@ -178,16 +140,18 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Update default contrast color when switching dark/light
+  // Resize canvas buffer ONLY when dimensions change to avoid GPU buffer churn
   useEffect(() => {
-    setCurrentColor((prev) => {
-      if (prev === '#0f172a' && isDark) return '#f8fafc';
-      if (prev === '#f8fafc' && !isDark) return '#0f172a';
-      return prev;
-    });
-  }, [isDark]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvasDimensions.width * dpr;
+    canvas.height = canvasDimensions.height * dpr;
+    canvas.style.width = `${canvasDimensions.width}px`;
+    canvas.style.height = `${canvasDimensions.height}px`;
+  }, [canvasDimensions]);
 
-  // Redraw canvas whenever relevant state changes
+  // Redraw canvas with requestAnimationFrame batching for smooth 60fps rendering
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -195,24 +159,30 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvasDimensions.width * dpr;
-    canvas.height = canvasDimensions.height * dpr;
-    canvas.style.width = `${canvasDimensions.width}px`;
-    canvas.style.height = `${canvasDimensions.height}px`;
+    let animId: number;
+    animId = requestAnimationFrame(() => {
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save();
+      ctx.scale(dpr, dpr);
 
-    ctx.scale(dpr, dpr);
+      renderWhiteboard(ctx, canvasDimensions.width, canvasDimensions.height, {
+        elements,
+        selectedIds,
+        hoveredId,
+        viewport,
+        isDark,
+        gridType,
+        currentDraft,
+        selectionBox,
+        alignmentGuides,
+        lassoPoints,
+        editingId: editingState?.id,
+      });
 
-    renderWhiteboard(ctx, canvasDimensions.width, canvasDimensions.height, {
-      elements,
-      selectedIds,
-      hoveredId,
-      viewport,
-      isDark,
-      gridType,
-      currentDraft,
-      selectionBox,
+      ctx.restore();
     });
+
+    return () => cancelAnimationFrame(animId);
   }, [
     elements,
     selectedIds,
@@ -222,25 +192,61 @@ export default function App() {
     gridType,
     currentDraft,
     selectionBox,
+    alignmentGuides,
+    lassoPoints,
+    editingState,
     canvasDimensions,
   ]);
 
   // Selected elements helper
   const selectedElements = elements.filter((el) => selectedIds.has(el.id));
 
-  // Change properties of selected elements
+  const isSelectedText = selectedElements.length > 0 && selectedElements.every((e) => e.type === 'text');
+  const isSelectedNote = selectedElements.length > 0 && selectedElements.every((e) => e.type === 'note');
+
+  // Dedicated active tool color - separates Sticky Notes, Text, and Pen
+  const activeToolColor =
+    currentTool === 'note' || isSelectedNote
+      ? noteBgColor
+      : currentTool === 'text' || isSelectedText
+      ? textColor
+      : penColor;
+
+  // Change properties of selected elements with clean tool separation
   const handlePropColorChange = (newColor: string) => {
-    setCurrentColor(newColor);
-    if (selectedIds.size > 0) {
-      const updated = elements.map((el) => {
-        if (!selectedIds.has(el.id)) return el;
-        if (el.type === 'stroke') return { ...el, color: newColor };
-        if (el.type === 'text') return { ...el, color: newColor };
-        if (el.type === 'shape') return { ...el, strokeColor: newColor };
-        if (el.type === 'note') return { ...el, color: newColor };
-        return el;
-      });
-      pushState(updated);
+    if (currentTool === 'note' || isSelectedNote) {
+      setNoteBgColor(newColor);
+      if (selectedIds.size > 0) {
+        const updated = elements.map((el) => {
+          if (selectedIds.has(el.id) && el.type === 'note') {
+            return { ...el, color: newColor };
+          }
+          return el;
+        });
+        pushState(updated);
+      }
+    } else if (currentTool === 'text' || isSelectedText) {
+      setTextColor(newColor);
+      if (selectedIds.size > 0) {
+        const updated = elements.map((el) => {
+          if (selectedIds.has(el.id) && el.type === 'text') {
+            return { ...el, color: newColor };
+          }
+          return el;
+        });
+        pushState(updated);
+      }
+    } else {
+      setPenColor(newColor);
+      if (selectedIds.size > 0) {
+        const updated = elements.map((el) => {
+          if (!selectedIds.has(el.id)) return el;
+          if (el.type === 'stroke') return { ...el, color: newColor };
+          if (el.type === 'shape') return { ...el, strokeColor: newColor };
+          return el;
+        });
+        pushState(updated);
+      }
     }
   };
 
@@ -250,8 +256,28 @@ export default function App() {
       const updated = elements.map((el) => {
         if (!selectedIds.has(el.id)) return el;
         if (el.type === 'stroke') return { ...el, size: newSize };
-        if (el.type === 'text') return { ...el, fontSize: newSize };
         if (el.type === 'shape') return { ...el, strokeWidth: newSize };
+        return el;
+      });
+      pushState(updated);
+    }
+  };
+
+  const handlePropFontSizeChange = (newFontSize: number) => {
+    setFontSize(newFontSize);
+    if (selectedIds.size > 0) {
+      const updated = elements.map((el) => {
+        if (!selectedIds.has(el.id)) return el;
+        if (el.type === 'text') {
+          const lines = el.text.split('\n');
+          const maxLen = Math.max(...lines.map((l) => l.length));
+          const estWidth = Math.max(60, maxLen * (newFontSize * 0.6));
+          const estHeight = Math.max(30, lines.length * (newFontSize * 1.35));
+          return { ...el, fontSize: newFontSize, width: estWidth, height: estHeight };
+        }
+        if (el.type === 'note') {
+          return { ...el, fontSize: newFontSize };
+        }
         return el;
       });
       pushState(updated);
@@ -271,6 +297,57 @@ export default function App() {
     }
   };
 
+  // Grouping helper: Expands any set of element IDs to include their grouped siblings
+  const expandSelectionToGroups = useCallback(
+    (ids: Set<string>, allElements: WhiteboardElement[]): Set<string> => {
+      const result = new Set(ids);
+      const groupIds = new Set<string>();
+
+      for (const el of allElements) {
+        if (ids.has(el.id) && el.groupId) {
+          groupIds.add(el.groupId);
+        }
+      }
+
+      if (groupIds.size > 0) {
+        for (const el of allElements) {
+          if (el.groupId && groupIds.has(el.groupId)) {
+            result.add(el.id);
+          }
+        }
+      }
+
+      return result;
+    },
+    []
+  );
+
+  // Group elements: Ctrl+G
+  const handleGroup = useCallback(() => {
+    if (selectedIds.size < 2) return;
+    const newGroupId = `group-${generateId()}`;
+    const updated = elements.map((el) => {
+      if (selectedIds.has(el.id)) {
+        return { ...el, groupId: newGroupId };
+      }
+      return el;
+    });
+    pushState(updated);
+  }, [selectedIds, elements, pushState]);
+
+  // Ungroup elements: Ctrl+Shift+G
+  const handleUngroup = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const updated = elements.map((el) => {
+      if (selectedIds.has(el.id)) {
+        const { groupId: _, ...rest } = el;
+        return rest as WhiteboardElement;
+      }
+      return el;
+    });
+    pushState(updated);
+  }, [selectedIds, elements, pushState]);
+
   // Actions on selected elements
   const deleteSelectedElements = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -284,14 +361,24 @@ export default function App() {
     const toDuplicate = elements.filter((el) => selectedIds.has(el.id));
     const newSelected = new Set<string>();
 
+    // Map old groupIds to new groupIds to preserve group structure
+    const groupMap = new Map<string, string>();
+    toDuplicate.forEach((el) => {
+      if (el.groupId && !groupMap.has(el.groupId)) {
+        groupMap.set(el.groupId, `group-${generateId()}`);
+      }
+    });
+
     const duplicated: WhiteboardElement[] = toDuplicate.map((el) => {
       const newId = generateId();
       newSelected.add(newId);
       const moved = moveElement(el, 30, 30);
+      const newGroupId = el.groupId ? groupMap.get(el.groupId) : undefined;
       return {
         ...moved,
         id: newId,
         zIndex: Date.now() + Math.random(),
+        ...(newGroupId ? { groupId: newGroupId } : {}),
       };
     });
 
@@ -347,16 +434,128 @@ export default function App() {
     }
   };
 
+  // Helper to create and place a new sticky note
+  const createStickyNote = (pos?: Point) => {
+    const center = pos || screenToCanvas(
+      canvasDimensions.width / 2,
+      canvasDimensions.height / 2,
+      viewport
+    );
+    const noteWidth = 200;
+    const noteHeight = 180;
+    const color = noteBgColor || '#fef08a';
+    const initialText = 'Sticky note';
+
+    const startX = pos ? Math.round(pos.x) : Math.round(center.x - noteWidth / 2);
+    const startY = pos ? Math.round(pos.y) : Math.round(center.y - noteHeight / 2);
+
+    const newNote: WhiteboardElement = {
+      id: generateId(),
+      type: 'note',
+      x: startX,
+      y: startY,
+      width: noteWidth,
+      height: noteHeight,
+      text: initialText,
+      color,
+      textColor: '#1e293b',
+      fontSize: 16,
+      zIndex: Date.now(),
+    };
+
+    pushState([...elements, newNote]);
+    setSelectedIds(new Set());
+
+    setEditingState({
+      id: newNote.id,
+      type: 'note',
+      canvasX: newNote.x,
+      canvasY: newNote.y,
+      initialText,
+      fontSize: 16,
+      color: '#1e293b',
+      bgColor: color,
+      width: noteWidth,
+      height: noteHeight,
+    });
+  };
+
+  // Helper to create and place a new text element
+  const createTextBox = (pos?: Point) => {
+    const center = pos || screenToCanvas(
+      canvasDimensions.width / 2,
+      canvasDimensions.height / 2,
+      viewport
+    );
+    const currentFontSize = fontSize || 20;
+    const initialText = 'Type text';
+    const lines = initialText.split('\n');
+    const maxLen = Math.max(...lines.map((l) => l.length));
+    const estWidth = Math.max(140, maxLen * (currentFontSize * 0.6) + 24);
+    const estHeight = Math.max(34, lines.length * (currentFontSize * 1.35) + 6);
+    const color = textColor || (isDark ? '#ffffff' : '#000000');
+
+    const startX = pos ? Math.round(pos.x) : Math.round(center.x - estWidth / 2);
+    const startY = pos ? Math.round(pos.y) : Math.round(center.y - estHeight / 2);
+
+    const newText: WhiteboardElement = {
+      id: generateId(),
+      type: 'text',
+      x: startX,
+      y: startY,
+      width: estWidth,
+      height: estHeight,
+      text: initialText,
+      fontSize: currentFontSize,
+      color,
+      zIndex: Date.now(),
+    };
+
+    pushState([...elements, newText]);
+    setSelectedIds(new Set());
+
+    setEditingState({
+      id: newText.id,
+      type: 'text',
+      canvasX: newText.x,
+      canvasY: newText.y,
+      initialText,
+      fontSize: currentFontSize,
+      color,
+      width: estWidth,
+      height: estHeight,
+    });
+  };
+
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (editingState) return; // Finish editing first
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
     const canvasPoint = screenToCanvas(e.clientX, e.clientY, viewport);
+
+    // 1. Text Tool click: place on canvas, start typing, deselect tool at the same time
+    if (currentTool === 'text') {
+      createTextBox(canvasPoint);
+      setCurrentTool('select');
+      return;
+    }
+
+    // 2. Note Tool click: place on canvas, start typing, deselect tool at the same time
+    if (currentTool === 'note') {
+      createStickyNote(canvasPoint);
+      setCurrentTool('select');
+      return;
+    }
+
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if pointer capture fails
+    }
+
     isPointerDownRef.current = true;
     dragStartCanvasPosRef.current = canvasPoint;
     dragStartScreenPosRef.current = { x: e.clientX, y: e.clientY };
-    lastCanvasPosRef.current = canvasPoint;
     initialElementsSnapshotRef.current = elements;
     hasMovedRef.current = false;
     erasedAnyRef.current = false;
@@ -364,35 +563,6 @@ export default function App() {
     // Check if middle click or spacebar held -> Pan mode
     if (e.button === 1 || isSpacePressedRef.current || currentTool === 'pan') {
       interactionModeRef.current = 'panning';
-      return;
-    }
-
-    // 1. Text Tool click
-    if (currentTool === 'text') {
-      setEditingState({
-        type: 'text',
-        canvasX: canvasPoint.x,
-        canvasY: canvasPoint.y,
-        initialText: '',
-        fontSize: penSize * 4 >= 14 ? penSize * 4 : 20,
-        color: currentColor,
-      });
-      return;
-    }
-
-    // 2. Note Tool click
-    if (currentTool === 'note') {
-      setEditingState({
-        type: 'note',
-        canvasX: canvasPoint.x,
-        canvasY: canvasPoint.y,
-        initialText: '',
-        fontSize: 15,
-        color: '#1e293b',
-        bgColor: currentColor.startsWith('#') && currentColor !== '#f8fafc' && currentColor !== '#0f172a' ? currentColor : '#fef08a',
-        width: 220,
-        height: 180,
-      });
       return;
     }
 
@@ -410,7 +580,7 @@ export default function App() {
         id: generateId(),
         type: 'stroke',
         points: [canvasPoint],
-        color: currentColor,
+        color: penColor,
         size: penSize,
         isHighlighter: currentTool === 'highlighter',
         strokeStyle: strokeStyle,
@@ -432,7 +602,7 @@ export default function App() {
         y: canvasPoint.y,
         width: 0,
         height: 0,
-        strokeColor: currentColor,
+        strokeColor: penColor,
         fillColor: fillColor,
         strokeWidth: penSize,
         strokeStyle: strokeStyle,
@@ -468,14 +638,23 @@ export default function App() {
       if (clickedElement) {
         // Element was clicked!
         if (e.shiftKey) {
-          // Toggle selection
           const next = new Set(selectedIds);
-          if (next.has(clickedElement.id)) next.delete(clickedElement.id);
-          else next.add(clickedElement.id);
-          setSelectedIds(next);
+          if (next.has(clickedElement.id)) {
+            if (clickedElement.groupId) {
+              elements.forEach((el) => {
+                if (el.groupId === clickedElement!.groupId) next.delete(el.id);
+              });
+            } else {
+              next.delete(clickedElement.id);
+            }
+            setSelectedIds(next);
+          } else {
+            next.add(clickedElement.id);
+            setSelectedIds(expandSelectionToGroups(next, elements));
+          }
         } else if (!selectedIds.has(clickedElement.id)) {
-          // Select single clicked element
-          setSelectedIds(new Set([clickedElement.id]));
+          // Select clicked element and all elements in its group
+          setSelectedIds(expandSelectionToGroups(new Set([clickedElement.id]), elements));
         }
 
         // Start Moving
@@ -496,6 +675,26 @@ export default function App() {
         width: 0,
         height: 0,
       });
+      return;
+    }
+
+    // 7. Lasso Selection Tool
+    if (currentTool === 'lasso') {
+      const clickedSelected = selectedElements.find((el) =>
+        isPointInElement(canvasPoint, el, 8 / viewport.zoom)
+      );
+
+      if (clickedSelected) {
+        interactionModeRef.current = 'moving';
+        return;
+      }
+
+      if (!e.shiftKey) {
+        setSelectedIds(new Set());
+      }
+      interactionModeRef.current = 'lasso';
+      setLassoPoints([canvasPoint]);
+      return;
     }
   };
 
@@ -583,15 +782,26 @@ export default function App() {
       }
 
       case 'moving': {
-        // Move all selected elements
-        const dx = canvasPoint.x - lastCanvasPosRef.current.x;
-        const dy = canvasPoint.y - lastCanvasPosRef.current.y;
-        lastCanvasPosRef.current = canvasPoint;
+        // Move all selected elements with smart alignment snapping
+        const rawDx = canvasPoint.x - dragStartCanvasPosRef.current.x;
+        const rawDy = canvasPoint.y - dragStartCanvasPosRef.current.y;
 
-        setElements((prev) =>
-          prev.map((el) => {
+        const selectedSnapshot = initialElementsSnapshotRef.current.filter((e) => selectedIds.has(e.id));
+        const snapThreshold = 6 / viewport.zoom;
+        const { snappedDx, snappedDy, guides } = calculateAlignmentSnap(
+          selectedSnapshot,
+          initialElementsSnapshotRef.current,
+          rawDx,
+          rawDy,
+          snapThreshold
+        );
+
+        setAlignmentGuides(guides);
+
+        setElements(
+          initialElementsSnapshotRef.current.map((el) => {
             if (selectedIds.has(el.id)) {
-              return moveElement(el, dx, dy);
+              return moveElement(el, snappedDx, snappedDy);
             }
             return el;
           })
@@ -646,7 +856,19 @@ export default function App() {
             matchingIds.add(el.id);
           }
         }
-        setSelectedIds(matchingIds);
+        setSelectedIds(expandSelectionToGroups(matchingIds, elements));
+        break;
+      }
+
+      case 'lasso': {
+        setLassoPoints((prev) => {
+          if (!prev || prev.length === 0) return [canvasPoint];
+          const last = prev[prev.length - 1];
+          if (distance(last, canvasPoint) >= 3 / viewport.zoom) {
+            return [...prev, canvasPoint];
+          }
+          return prev;
+        });
         break;
       }
     }
@@ -667,6 +889,7 @@ export default function App() {
     const mode = interactionModeRef.current;
     interactionModeRef.current = 'none';
     setSelectionBox(null);
+    setAlignmentGuides([]);
 
     // 1. Commit stroke or shape
     if (mode === 'drawing' && currentDraft) {
@@ -679,6 +902,7 @@ export default function App() {
         }
       }
       setCurrentDraft(null);
+      setSelectedIds(new Set());
     }
 
     // 2. Commit movement or resize to history
@@ -690,6 +914,37 @@ export default function App() {
     if (mode === 'erasing' && erasedAnyRef.current) {
       pushState(elements);
     }
+
+    // 4. Commit Lasso selection
+    if (mode === 'lasso' && lassoPoints && lassoPoints.length >= 3) {
+      let polyMinX = Infinity;
+      let polyMaxX = -Infinity;
+      let polyMinY = Infinity;
+      let polyMaxY = -Infinity;
+      for (const p of lassoPoints) {
+        if (p.x < polyMinX) polyMinX = p.x;
+        if (p.x > polyMaxX) polyMaxX = p.x;
+        if (p.y < polyMinY) polyMinY = p.y;
+        if (p.y > polyMaxY) polyMaxY = p.y;
+      }
+      const polyBox: BoundingBox = {
+        minX: polyMinX,
+        minY: polyMinY,
+        maxX: polyMaxX,
+        maxY: polyMaxY,
+        width: polyMaxX - polyMinX,
+        height: polyMaxY - polyMinY,
+      };
+
+      const matchingIds = new Set<string>(e?.shiftKey ? selectedIds : []);
+      for (const el of elements) {
+        if (isElementInLasso(el, lassoPoints, polyBox)) {
+          matchingIds.add(el.id);
+        }
+      }
+      setSelectedIds(expandSelectionToGroups(matchingIds, elements));
+    }
+    setLassoPoints(null);
   };
 
   // Erase helper
@@ -745,18 +1000,6 @@ export default function App() {
         }
       }
     }
-
-    // If double clicked empty canvas in Select mode, create quick text!
-    if (currentTool === 'select') {
-      setEditingState({
-        type: 'text',
-        canvasX: canvasPoint.x,
-        canvasY: canvasPoint.y,
-        initialText: '',
-        fontSize: 20,
-        color: currentColor,
-      });
-    }
   };
 
   // Inline editor commit
@@ -769,16 +1012,21 @@ export default function App() {
       if (editingState.id) {
         pushState(elements.filter((el) => el.id !== editingState.id));
       }
+      setSelectedIds(new Set());
       setEditingState(null);
+      setCurrentTool('select');
       return;
     }
 
     if (editingState.id) {
-      // Update existing
       const updated = elements.map((el) => {
         if (el.id !== editingState.id) return el;
         if (el.type === 'text') {
-          return { ...el, text: trimmed };
+          const lines = trimmed.split('\n');
+          const maxLen = Math.max(...lines.map((l) => l.length));
+          const estWidth = Math.max(80, maxLen * (el.fontSize * 0.6) + 20);
+          const estHeight = Math.max(30, lines.length * (el.fontSize * 1.35) + 6);
+          return { ...el, text: trimmed, width: estWidth, height: estHeight };
         }
         if (el.type === 'note') {
           return { ...el, text: trimmed };
@@ -786,49 +1034,11 @@ export default function App() {
         return el;
       });
       pushState(updated);
-    } else {
-      // Create new
-      if (editingState.type === 'text') {
-        const lines = trimmed.split('\n');
-        const maxLen = Math.max(...lines.map((l) => l.length));
-        const estWidth = Math.max(60, maxLen * (editingState.fontSize * 0.6));
-        const estHeight = Math.max(30, lines.length * (editingState.fontSize * 1.35));
-
-        const newTextEl: WhiteboardElement = {
-          id: generateId(),
-          type: 'text',
-          x: editingState.canvasX,
-          y: editingState.canvasY,
-          text: trimmed,
-          fontSize: editingState.fontSize,
-          color: editingState.color,
-          width: estWidth,
-          height: estHeight,
-          zIndex: Date.now(),
-        };
-
-        setSelectedIds(new Set([newTextEl.id]));
-        pushState([...elements, newTextEl]);
-      } else {
-        const newNoteEl: WhiteboardElement = {
-          id: generateId(),
-          type: 'note',
-          x: editingState.canvasX,
-          y: editingState.canvasY,
-          width: editingState.width || 220,
-          height: editingState.height || 180,
-          text: trimmed,
-          color: editingState.bgColor || '#fef08a',
-          textColor: editingState.color || '#1e293b',
-          fontSize: editingState.fontSize || 15,
-          zIndex: Date.now(),
-        };
-
-        setSelectedIds(new Set([newNoteEl.id]));
-        pushState([...elements, newNoteEl]);
-      }
     }
+
+    setSelectedIds(new Set());
     setEditingState(null);
+    setCurrentTool('select');
   };
 
   // Keyboard shortcut listener
@@ -863,6 +1073,16 @@ export default function App() {
         return;
       }
 
+      // Select All Shapes & Elements (Ctrl+A / Cmd+A)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        if (elements.length > 0) {
+          setCurrentTool('select');
+          setSelectedIds(new Set(elements.map((el) => el.id)));
+        }
+        return;
+      }
+
       // Duplicate
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault();
@@ -881,13 +1101,40 @@ export default function App() {
 
       // Deselect / Escape
       if (e.key === 'Escape') {
+        if (isShapeMenuOpen) {
+          setIsShapeMenuOpen(false);
+          return;
+        }
         setSelectedIds(new Set());
         setCurrentDraft(null);
         setEditingState(null);
         return;
       }
 
-      // Arrow keys nudge selected
+      // Arrow keys and Enter when shapes menu is open
+      if (isShapeMenuOpen) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          setHighlightedShapeIndex((prev) => (prev + 1) % 4);
+          return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setHighlightedShapeIndex((prev) => (prev - 1 + 4) % 4);
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const shapeList: ToolType[] = ['rectangle', 'circle', 'arrow', 'line'];
+          const chosen = shapeList[highlightedShapeIndex] || 'rectangle';
+          setActiveShape(chosen);
+          setCurrentTool(chosen);
+          setIsShapeMenuOpen(false);
+          return;
+        }
+      }
+
+      // Arrow keys nudge selected (when shapes menu is closed)
       if (selectedIds.size > 0 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         const step = e.shiftKey ? 10 : 2;
@@ -908,48 +1155,98 @@ export default function App() {
         return;
       }
 
-      // Number key tool shortcuts (1 - 8) & letter aliases
+      // Grouping: Ctrl+G (Group) / Ctrl+Shift+G (Ungroup)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleUngroup();
+        } else {
+          handleGroup();
+        }
+        return;
+      }
+
+      // Hold down 5 to expand shapes menu
+      if (e.key === '5') {
+        if (!key5IsPressedRef.current) {
+          key5IsPressedRef.current = true;
+          key5HeldLongEnoughRef.current = false;
+          if (key5HoldTimerRef.current) clearTimeout(key5HoldTimerRef.current);
+          key5HoldTimerRef.current = setTimeout(() => {
+            key5HeldLongEnoughRef.current = true;
+            setIsShapeMenuOpen(true);
+            const shapeList: ToolType[] = ['rectangle', 'circle', 'arrow', 'line'];
+            const curIdx = shapeList.indexOf(activeShape);
+            setHighlightedShapeIndex(curIdx >= 0 ? curIdx : 0);
+          }, 220);
+        } else if (e.repeat) {
+          key5HeldLongEnoughRef.current = true;
+          setIsShapeMenuOpen(true);
+        }
+        return;
+      }
+
+      // Tool shortcuts (1 - 8) & letter aliases:
+      // Group 1: 1/V (Select), 2/Q (Lasso)
+      // Group 2: 3/P (Pen), 4/H (Highlighter), 5/S (Shapes)
+      // Group 3: 6/T (Text), 7/N (Sticky Note)
+      // Group 4: 8/M (Free Hand Pan)
       switch (e.key.toLowerCase()) {
         case '1':
         case 'v':
           setCurrentTool('select');
           break;
         case '2':
+        case 'q':
+          setCurrentTool('lasso');
+          break;
+        case '3':
         case 'p':
           setCurrentTool('pen');
           break;
-        case '3':
+        case '4':
         case 'h':
           setCurrentTool('highlighter');
           break;
-        case '4':
-        case 't':
-          setCurrentTool('text');
-          break;
         case '5':
+        case 's':
+          setCurrentTool(activeShape);
+          break;
         case 'r':
+          setActiveShape('rectangle');
           setCurrentTool('rectangle');
           break;
         case 'c':
+          setActiveShape('circle');
           setCurrentTool('circle');
           break;
         case 'a':
+          setActiveShape('arrow');
           setCurrentTool('arrow');
           break;
         case 'l':
+          setActiveShape('line');
           setCurrentTool('line');
           break;
         case '6':
-        case 'n':
-          setCurrentTool('note');
+        case 't':
+          e.preventDefault();
+          setCurrentTool('text');
+          setSelectedIds(new Set());
           break;
         case '7':
-        case 'e':
-          setCurrentTool('eraser');
+        case 'n':
+          e.preventDefault();
+          setCurrentTool('note');
+          setSelectedIds(new Set());
           break;
         case '8':
         case 'm':
+          e.preventDefault();
           setCurrentTool('pan');
+          break;
+        case 'e':
+          setCurrentTool('eraser');
           break;
         case '?':
           setShortcutsModalOpen(true);
@@ -964,6 +1261,24 @@ export default function App() {
           canvasRef.current.style.cursor = currentTool === 'select' ? 'default' : 'crosshair';
         }
       }
+
+      if (e.key === '5') {
+        if (key5HoldTimerRef.current) {
+          clearTimeout(key5HoldTimerRef.current);
+          key5HoldTimerRef.current = null;
+        }
+        if (!key5HeldLongEnoughRef.current) {
+          // Quick tap
+          if (!isShapeMenuOpen) {
+            setCurrentTool(activeShape);
+          } else {
+            // Already open: cycle to next shape!
+            setHighlightedShapeIndex((prev) => (prev + 1) % 4);
+          }
+        }
+        key5IsPressedRef.current = false;
+        key5HeldLongEnoughRef.current = false;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -972,7 +1287,19 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [undo, redo, duplicateSelectedElements, deleteSelectedElements, selectedIds, elements, currentTool, pushState]);
+  }, [
+    undo,
+    redo,
+    duplicateSelectedElements,
+    deleteSelectedElements,
+    selectedIds,
+    elements,
+    currentTool,
+    activeShape,
+    isShapeMenuOpen,
+    highlightedShapeIndex,
+    pushState,
+  ]);
 
   // Export as PNG
   const handleExportPNG = () => {
@@ -1028,7 +1355,7 @@ export default function App() {
     if (isSpacePressedRef.current || currentTool === 'pan') return 'grab';
     if (currentTool === 'eraser') return 'crosshair';
     if (currentTool === 'text') return 'text';
-    if (currentTool === 'pen' || currentTool === 'highlighter') return 'crosshair';
+    if (currentTool === 'pen' || currentTool === 'highlighter' || currentTool === 'lasso') return 'crosshair';
     if (['rectangle', 'circle', 'line', 'arrow', 'note'].includes(currentTool)) return 'crosshair';
     return 'default';
   };
@@ -1038,7 +1365,7 @@ export default function App() {
       {/* 1. Top Header */}
       <TopHeader
         isDark={isDark}
-        onToggleTheme={() => setIsDark(!isDark)}
+        onToggleTheme={() => setIsDark((prev) => !prev)}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={undo}
@@ -1051,6 +1378,7 @@ export default function App() {
         viewport={viewport}
         onResetZoom={() => setViewport({ x: 0, y: 0, zoom: 1 })}
         onOpenShortcuts={() => setShortcutsModalOpen(true)}
+        onOpenWhatsNew={() => setWhatsNewOpen(true)}
         onExportPNG={handleExportPNG}
         onExportJSON={handleExportJSON}
         elementsCount={elements.length}
@@ -1063,7 +1391,9 @@ export default function App() {
         selectedElements={selectedElements}
         penSize={penSize}
         onChangePenSize={handlePropPenSizeChange}
-        currentColor={currentColor}
+        fontSize={fontSize}
+        onChangeFontSize={handlePropFontSizeChange}
+        currentColor={activeToolColor}
         onChangeColor={handlePropColorChange}
         strokeStyle={strokeStyle}
         onChangeStrokeStyle={handlePropStrokeStyleChange}
@@ -1095,8 +1425,13 @@ export default function App() {
         <InlineTextEditor
           editingState={editingState}
           viewport={viewport}
+          isDark={isDark}
           onCommit={handleCommitText}
-          onCancel={() => setEditingState(null)}
+          onCancel={() => {
+            setEditingState(null);
+            setSelectedIds(new Set());
+            setCurrentTool('select');
+          }}
         />
       )}
 
@@ -1105,11 +1440,19 @@ export default function App() {
         currentTool={currentTool}
         onSelectTool={(tool) => {
           setCurrentTool(tool);
+          if (['rectangle', 'circle', 'arrow', 'line'].includes(tool)) {
+            setActiveShape(tool);
+          }
           if (tool !== 'select') {
             setSelectedIds(new Set());
           }
         }}
-        isDark={isDark}
+        activeShape={activeShape}
+        setActiveShape={setActiveShape}
+        isShapeMenuOpen={isShapeMenuOpen}
+        setIsShapeMenuOpen={setIsShapeMenuOpen}
+        highlightedShapeIndex={highlightedShapeIndex}
+        setHighlightedShapeIndex={setHighlightedShapeIndex}
       />
 
       {/* 6. Helpful Quick Status Bar at bottom right */}
@@ -1123,6 +1466,20 @@ export default function App() {
       <KeyboardShortcutsModal
         isOpen={shortcutsModalOpen}
         onClose={() => setShortcutsModalOpen(false)}
+      />
+
+      {/* 8. What's New / One-Time Update Modal */}
+      <WhatsNewModal
+        isOpen={whatsNewOpen}
+        onClose={() => {
+          try {
+            localStorage.setItem('worb_last_seen_version', CURRENT_APP_VERSION);
+          } catch {
+            // Ignore if localStorage unavailable
+          }
+          setWhatsNewOpen(false);
+        }}
+        onOpenShortcuts={() => setShortcutsModalOpen(true)}
       />
     </div>
   );

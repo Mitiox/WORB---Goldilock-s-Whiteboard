@@ -18,6 +18,7 @@ export interface EditingState {
 interface InlineTextEditorProps {
   editingState: EditingState;
   viewport: Viewport;
+  isDark?: boolean;
   onCommit: (text: string) => void;
   onCancel: () => void;
 }
@@ -25,73 +26,93 @@ interface InlineTextEditorProps {
 export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
   editingState,
   viewport,
+  isDark = false,
   onCommit,
   onCancel,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = React.useState(editingState.initialText);
 
+  const isNote = editingState.type === 'note';
+
+  // For sticky note, the canvas note renderer uses padding of 14px
+  const notePadding = 14 * viewport.zoom;
   const screenPos = canvasToScreen(
     editingState.canvasX,
     editingState.canvasY,
     viewport
   );
 
+  const posX = isNote ? screenPos.x + notePadding : screenPos.x;
+  const posY = isNote ? screenPos.y + notePadding : screenPos.y;
+
+  const autoResize = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.max(textareaRef.current.scrollHeight, 24)}px`;
+    }
+  };
+
   useEffect(() => {
+    setText(editingState.initialText);
     if (textareaRef.current) {
       textareaRef.current.focus();
       textareaRef.current.select();
+      autoResize();
     }
-  }, []);
+  }, [editingState.initialText, editingState.id]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       onCancel();
-    } else if (e.key === 'Enter' && !e.shiftKey && editingState.type === 'text') {
+    } else if (e.key === 'Enter' && !e.shiftKey && !isNote) {
       e.preventDefault();
       onCommit(text);
     }
   };
 
-  const isNote = editingState.type === 'note';
   const scaledFontSize = Math.max(12, editingState.fontSize * viewport.zoom);
-  const minWidth = isNote ? (editingState.width || 180) * viewport.zoom : 180;
-  const minHeight = isNote ? (editingState.height || 160) * viewport.zoom : 40;
+  const noteInnerWidth = ((editingState.width || 200) - 28) * viewport.zoom;
+  const noteInnerHeight = ((editingState.height || 180) - 28) * viewport.zoom;
+
+  const effectiveTextColor =
+    editingState.color || (isNote ? '#1e293b' : isDark ? '#ffffff' : '#000000');
 
   return (
     <div
-      className="absolute z-40"
+      className="absolute z-50 pointer-events-auto"
       style={{
-        left: screenPos.x,
-        top: screenPos.y,
+        left: posX,
+        top: posY,
       }}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="relative">
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={() => onCommit(text)}
-          placeholder={isNote ? 'Write your note...' : 'Type text here...'}
-          className={`resize-none border outline-none font-['Plus_Jakarta_Sans'] leading-snug p-2 rounded-lg shadow-md transition-shadow ${
-            isNote
-              ? 'border-indigo-400 shadow-lg'
-              : 'border-indigo-500 bg-white/95 dark:bg-zinc-900/95 dark:border-indigo-400'
-          }`}
-          style={{
-            minWidth: `${minWidth}px`,
-            minHeight: `${minHeight}px`,
-            fontSize: `${scaledFontSize}px`,
-            color: editingState.color,
-            backgroundColor: isNote ? editingState.bgColor : undefined,
-          }}
-        />
-        <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-1 flex items-center justify-between">
-          <span>{isNote ? 'Shift+Enter for line, click outside to save' : 'Enter to save · Esc to cancel'}</span>
-        </div>
-      </div>
+      <textarea
+        ref={textareaRef}
+        value={text}
+        rows={isNote ? undefined : 1}
+        onChange={(e) => {
+          setText(e.target.value);
+          autoResize();
+        }}
+        onKeyDown={handleKeyDown}
+        onBlur={() => onCommit(text)}
+        placeholder={isNote ? 'Type note...' : 'Type text...'}
+        className={
+          isNote
+            ? 'resize-none border-none outline-none font-[\'Plus_Jakarta_Sans\'] bg-transparent leading-[1.35] p-0 m-0 overflow-y-auto'
+            : 'resize-none border-2 border-indigo-500/80 dark:border-indigo-400 outline-none font-[\'Plus_Jakarta_Sans\'] bg-white/80 dark:bg-zinc-900/85 backdrop-blur-xs leading-[1.35] px-2.5 py-1 -mx-2.5 -my-1 rounded-lg shadow-sm whitespace-pre overflow-hidden'
+        }
+        style={{
+          width: isNote ? `${noteInnerWidth}px` : undefined,
+          minWidth: isNote ? `${noteInnerWidth}px` : '140px',
+          height: isNote ? `${noteInnerHeight}px` : undefined,
+          fontSize: `${scaledFontSize}px`,
+          color: effectiveTextColor,
+        }}
+      />
     </div>
   );
 };

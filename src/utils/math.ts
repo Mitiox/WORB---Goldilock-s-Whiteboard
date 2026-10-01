@@ -355,3 +355,106 @@ export function getHandleAtPoint(
   }
   return null;
 }
+
+export function isPointInPolygon(point: Point, polygon: Point[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function isElementInLasso(
+  element: WhiteboardElement,
+  polygon: Point[],
+  precomputedPolyBox?: BoundingBox
+): boolean {
+  if (polygon.length < 3) return false;
+
+  let polyMinX: number;
+  let polyMaxX: number;
+  let polyMinY: number;
+  let polyMaxY: number;
+
+  if (precomputedPolyBox) {
+    polyMinX = precomputedPolyBox.minX;
+    polyMaxX = precomputedPolyBox.maxX;
+    polyMinY = precomputedPolyBox.minY;
+    polyMaxY = precomputedPolyBox.maxY;
+  } else {
+    polyMinX = Infinity;
+    polyMaxX = -Infinity;
+    polyMinY = Infinity;
+    polyMaxY = -Infinity;
+    for (let i = 0; i < polygon.length; i++) {
+      const p = polygon[i];
+      if (p.x < polyMinX) polyMinX = p.x;
+      if (p.x > polyMaxX) polyMaxX = p.x;
+      if (p.y < polyMinY) polyMinY = p.y;
+      if (p.y > polyMaxY) polyMaxY = p.y;
+    }
+  }
+
+  const elBox = getElementBoundingBox(element);
+  if (
+    elBox.maxX < polyMinX ||
+    elBox.minX > polyMaxX ||
+    elBox.maxY < polyMinY ||
+    elBox.minY > polyMaxY
+  ) {
+    return false;
+  }
+
+  // 2. Element specific inclusion test
+  if (element.type === 'stroke') {
+    if (element.points.length === 0) return false;
+    const step = Math.max(1, Math.floor(element.points.length / 10));
+    for (let i = 0; i < element.points.length; i += step) {
+      if (isPointInPolygon(element.points[i], polygon)) return true;
+    }
+    const midIdx = Math.floor(element.points.length / 2);
+    if (isPointInPolygon(element.points[midIdx], polygon)) return true;
+    return false;
+  }
+
+  // Shapes, text, notes:
+  const center = {
+    x: elBox.minX + elBox.width / 2,
+    y: elBox.minY + elBox.height / 2,
+  };
+  if (isPointInPolygon(center, polygon)) return true;
+
+  // Check 4 corners
+  const corners: Point[] = [
+    { x: elBox.minX, y: elBox.minY },
+    { x: elBox.maxX, y: elBox.minY },
+    { x: elBox.maxX, y: elBox.maxY },
+    { x: elBox.minX, y: elBox.maxY },
+  ];
+  for (const c of corners) {
+    if (isPointInPolygon(c, polygon)) return true;
+  }
+
+  // Also check if any polygon vertex is inside element
+  for (const p of polygon) {
+    if (
+      p.x >= elBox.minX &&
+      p.x <= elBox.maxX &&
+      p.y >= elBox.minY &&
+      p.y <= elBox.maxY
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}

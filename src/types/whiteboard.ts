@@ -1,5 +1,6 @@
 export type ToolType = 
   | 'select' 
+  | 'lasso'
   | 'pen' 
   | 'highlighter' 
   | 'eraser' 
@@ -33,6 +34,7 @@ export interface BaseElement {
   id: string;
   zIndex: number;
   opacity?: number;
+  groupId?: string;
 }
 
 export interface StrokeElement extends BaseElement {

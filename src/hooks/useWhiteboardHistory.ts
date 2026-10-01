@@ -32,12 +32,18 @@ export function useWhiteboardHistory(initialElements: WhiteboardElement[] = []) 
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
+  // Debounced persistence to avoid blocking UI thread with synchronous localStorage writes
+  const storageTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const saveToStorage = useCallback((items: WhiteboardElement[]) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      // Ignore storage quota errors
-    }
+    if (storageTimerRef.current) clearTimeout(storageTimerRef.current);
+    storageTimerRef.current = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }, 200);
   }, []);
 
   const updateHistoryFlags = useCallback(() => {
@@ -59,8 +65,9 @@ export function useWhiteboardHistory(initialElements: WhiteboardElement[] = []) 
   const pushState = useCallback(
     (newElements: WhiteboardElement[]) => {
       setElementsState((prev) => {
-        // Only push if changed
-        if (JSON.stringify(prev) === JSON.stringify(newElements)) {
+        // Fast reference & item identity check before fallback
+        if (prev === newElements) return prev;
+        if (prev.length === newElements.length && prev.every((el, idx) => el === newElements[idx])) {
           return prev;
         }
 

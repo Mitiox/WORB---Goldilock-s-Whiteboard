@@ -13,25 +13,30 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   if (!isOpen) return null;
 
   const shortcuts = [
-    { group: 'Tools (Number Keys)', items: [
-      { key: '1', desc: 'Select & Move element(s)' },
-      { key: '2', desc: 'Freehand Pen' },
-      { key: '3', desc: 'Highlighter' },
-      { key: '4', desc: 'Text tool' },
-      { key: '5', desc: 'Shapes (Rect, Circle, Arrow, Line)' },
-      { key: '6', desc: 'Sticky Note' },
-      { key: '7', desc: 'Eraser' },
-      { key: '8', desc: 'Pan / Hand tool' },
-      { key: 'Space + Drag', desc: 'Quick Pan from any tool' },
+    { group: 'Tools (Number & Letter Shortcuts)', items: [
+      { key: '1 / V', desc: 'Select & Move element(s)' },
+      { key: '2 / Q', desc: 'Lasso Select (freeform loop)' },
+      { key: '3 / P', desc: 'Freehand Pen' },
+      { key: '4 / H', desc: 'Highlighter' },
+      { key: '5 / S', desc: 'Shapes (Tap to switch · Hold 5 to expand menu)' },
+      { key: 'R / C / A / L', desc: 'Quick Shapes: Rectangle, Circle, Arrow, Line' },
+      { key: '↑ ↓ & Enter', desc: 'Navigate & select shape in menu' },
+      { key: '6 / T', desc: 'Text tool (click canvas to type)' },
+      { key: '7 / N', desc: 'Sticky Note (click canvas to drop note)' },
+      { key: '8 / M', desc: 'Free Hand Pan (also Space + Drag)' },
+      { key: 'E', desc: 'Eraser (brush over items to erase)' },
     ]},
-    { group: 'Actions', items: [
+    { group: 'Actions & Editing', items: [
+      { key: 'Ctrl + G', desc: 'Group selected elements' },
+      { key: 'Ctrl + Shift + G', desc: 'Ungroup elements' },
+      { key: 'Ctrl + A', desc: 'Select all shapes & elements' },
       { key: 'Ctrl + Z', desc: 'Undo' },
       { key: 'Ctrl + Y', desc: 'Redo' },
       { key: 'Ctrl + D', desc: 'Duplicate selected element' },
       { key: 'Del / Backspace', desc: 'Delete selected element' },
       { key: 'Double Click', desc: 'Edit text or sticky note' },
       { key: 'Wheel', desc: 'Zoom in / out' },
-      { key: 'Esc', desc: 'Deselect / Cancel current tool' },
+      { key: 'Esc', desc: 'Deselect / Close menu / Cancel tool' },
     ]},
   ];
 

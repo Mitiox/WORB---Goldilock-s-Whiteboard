@@ -17,14 +17,29 @@ import {
   MousePointer,
   Hand,
   ChevronUp,
+  LassoSelect,
 } from 'lucide-react';
 import { StrokeStyle, ToolType, WhiteboardElement } from '../types/whiteboard';
+
+const PEN_SIZES = [2, 4, 8, 14];
+
+const NOTE_COLORS = [
+  '#fef08a', // Lemon yellow
+  '#bbf7d0', // Mint green
+  '#bae6fd', // Sky blue
+  '#e9d5ff', // Lavender
+  '#fed7aa', // Peach
+  '#fecdd3', // Blush
+  '#27272a', // Dark slate note
+];
 
 interface PropertiesBarProps {
   currentTool: ToolType;
   selectedElements: WhiteboardElement[];
   penSize: number;
   onChangePenSize: (size: number) => void;
+  fontSize: number;
+  onChangeFontSize: (size: number) => void;
   currentColor: string;
   onChangeColor: (color: string) => void;
   strokeStyle: StrokeStyle;
@@ -44,6 +59,8 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
   selectedElements,
   penSize,
   onChangePenSize,
+  fontSize,
+  onChangeFontSize,
   currentColor,
   onChangeColor,
   strokeStyle,
@@ -67,11 +84,27 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
   const hasSelection = selectedElements.length > 0;
   const isExpanded = isHovered || isPinned || hasSelection;
 
-  const isDrawingOrShape =
-    ['pen', 'highlighter', 'rectangle', 'circle', 'line', 'arrow'].includes(currentTool) ||
-    hasSelection;
-  const isTextTool = currentTool === 'text' || selectedElements.some((e) => e.type === 'text');
-  const isNoteTool = currentTool === 'note' || selectedElements.some((e) => e.type === 'note');
+  const hasTextSelected = selectedElements.some((e) => e.type === 'text');
+  const hasNoteSelected = selectedElements.some((e) => e.type === 'note');
+  const isOnlyTextOrNoteSelected =
+    hasSelection && selectedElements.every((e) => e.type === 'text' || e.type === 'note');
+  const isTextOrNoteTool = currentTool === 'text' || currentTool === 'note';
+
+  // Requirement 3: For text and sticky remove the stroke size option, replace with font size slider
+  const showFontSize = isTextOrNoteTool || isOnlyTextOrNoteSelected;
+  const showStrokeSize =
+    !showFontSize &&
+    (['pen', 'highlighter', 'rectangle', 'circle', 'line', 'arrow'].includes(currentTool) ||
+      (hasSelection && selectedElements.some((e) => e.type === 'stroke' || e.type === 'shape')));
+
+  const isTextTool = currentTool === 'text' || hasTextSelected;
+  const isNoteTool = currentTool === 'note' || hasNoteSelected;
+
+  const selectedTextOrNote = selectedElements.find((e) => e.type === 'text' || e.type === 'note');
+  const activeFontSize =
+    (selectedTextOrNote && 'fontSize' in selectedTextOrNote ? selectedTextOrNote.fontSize : null) ||
+    fontSize ||
+    20;
 
   // Measure content height continuously so both width & height animate simultaneously
   useEffect(() => {
@@ -87,12 +120,13 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
       observer.observe(contentRef.current);
       return () => observer.disconnect();
     }
-  }, [currentTool, hasSelection, isDrawingOrShape, isTextTool, isNoteTool]);
+  }, [currentTool, hasSelection, showStrokeSize, showFontSize, isTextTool, isNoteTool]);
 
-  // Curated color palette
-  const defaultHighContrast = isDark ? '#f8fafc' : '#0f172a';
+  // Curated color palette - Requirement 2: white in dark mode and black in light mode
+  const defaultHighContrast = isDark ? '#ffffff' : '#000000';
   const colorPalette = [
     defaultHighContrast,
+    isDark ? '#000000' : '#ffffff',
     '#64748b', // Slate
     '#ef4444', // Red
     '#f59e0b', // Amber
@@ -102,18 +136,6 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
     '#a855f7', // Purple
     '#f43f5e', // Rose
   ];
-
-  const noteColors = [
-    '#fef08a', // Lemon yellow
-    '#bbf7d0', // Mint green
-    '#bae6fd', // Sky blue
-    '#e9d5ff', // Lavender
-    '#fed7aa', // Peach
-    '#fecdd3', // Blush
-    '#27272a', // Dark slate note
-  ];
-
-  const penSizes = [2, 4, 8, 14];
 
   // Smooth hover enter / leave with micro-debounce
   const handleMouseEnter = () => {
@@ -176,6 +198,8 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
         return <Eraser className="w-4 h-4" />;
       case 'pan':
         return <Hand className="w-4 h-4" />;
+      case 'lasso':
+        return <LassoSelect className="w-4 h-4" />;
       case 'select':
       default:
         return <MousePointer className="w-4 h-4" />;
@@ -296,15 +320,50 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
             </div>
           </div>
 
-          {/* 1. Size / Thickness customization */}
-          {isDrawingOrShape && (
+          {/* 1. Size / Thickness customization: Font Size for Text & Sticky Notes, Stroke Size for Strokes & Shapes */}
+          {showFontSize ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400">
+                <span>Font Size</span>
+                <span className="font-mono">{activeFontSize}px</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[14, 18, 24, 32, 44].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => onChangeFontSize(size)}
+                    title={`${size}px font size`}
+                    className={`flex-1 h-7 rounded-lg text-xs font-medium flex items-center justify-center transition-all ${
+                      activeFontSize === size
+                        ? 'bg-indigo-50 border border-indigo-500 text-indigo-700 dark:bg-indigo-950/60 dark:border-indigo-500 dark:text-indigo-300'
+                        : 'bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-transparent text-slate-700 dark:text-zinc-300'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+
+              {/* Continuous Font Size Slider (12px to 72px) */}
+              <div className="pt-1">
+                <input
+                  type="range"
+                  min={12}
+                  max={72}
+                  value={activeFontSize}
+                  onChange={(e) => onChangeFontSize(Number(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+              </div>
+            </div>
+          ) : showStrokeSize ? (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-zinc-400">
                 <span>Stroke Size</span>
                 <span className="font-mono">{penSize}px</span>
               </div>
               <div className="flex items-center gap-1.5">
-                {penSizes.map((size) => (
+                {PEN_SIZES.map((size) => (
                   <button
                     key={size}
                     onClick={() => onChangePenSize(size)}
@@ -335,7 +394,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                 />
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* 2. Color Selection */}
           <div className="flex flex-col gap-1.5 pt-1">
@@ -347,7 +406,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
             {/* Note Palette if sticky note */}
             {isNoteTool ? (
               <div className="grid grid-cols-7 gap-1">
-                {noteColors.map((color) => (
+                {NOTE_COLORS.map((color) => (
                   <button
                     key={color}
                     onClick={() => onChangeColor(color)}
@@ -402,7 +461,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
           </div>
 
           {/* 3. Stroke Style (Solid, Dashed, Dotted) for pen, shapes, lines */}
-          {isDrawingOrShape && !isNoteTool && (
+          {showStrokeSize && !isNoteTool && (
             <div className="flex flex-col gap-1 pt-1 border-t border-slate-100 dark:border-zinc-800">
               <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">
                 Style
@@ -419,30 +478,6 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                     }`}
                   >
                     {st}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 4. Text font size if text element selected */}
-          {isTextTool && (
-            <div className="flex flex-col gap-1 pt-1 border-t border-slate-100 dark:border-zinc-800">
-              <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">
-                Font Size
-              </span>
-              <div className="flex items-center gap-1">
-                {[16, 22, 32, 44].map((fs) => (
-                  <button
-                    key={fs}
-                    onClick={() => onChangePenSize(fs)}
-                    className={`flex-1 py-1 text-xs rounded-md transition-colors ${
-                      penSize === fs
-                        ? 'bg-slate-200 dark:bg-zinc-800 font-medium text-slate-900 dark:text-zinc-100'
-                        : 'text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800/60'
-                    }`}
-                  >
-                    {fs}px
                   </button>
                 ))}
               </div>

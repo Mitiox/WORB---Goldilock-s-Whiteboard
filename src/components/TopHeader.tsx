@@ -8,11 +8,10 @@ import {
   Download,
   Trash2,
   HelpCircle,
-  Maximize2,
-  Check,
   FileDown,
+  Sparkles,
 } from 'lucide-react';
-import { Viewport, WhiteboardElement } from '../types/whiteboard';
+import { Viewport } from '../types/whiteboard';
 
 interface TopHeaderProps {
   isDark: boolean;
@@ -27,6 +26,7 @@ interface TopHeaderProps {
   viewport: Viewport;
   onResetZoom: () => void;
   onOpenShortcuts: () => void;
+  onOpenWhatsNew?: () => void;
   onExportPNG: () => void;
   onExportJSON: () => void;
   elementsCount: number;
@@ -46,6 +46,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   viewport,
   onResetZoom,
   onOpenShortcuts,
+  onOpenWhatsNew,
   onExportPNG,
   onExportJSON,
   elementsCount,
@@ -210,10 +211,22 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           )}
         </div>
 
+        {/* What's New button */}
+        {onOpenWhatsNew && (
+          <button
+            onClick={onOpenWhatsNew}
+            title="What's New in this version"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium hover:bg-slate-100 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">What's New</span>
+          </button>
+        )}
+
         {/* Shortcuts button */}
         <button
           onClick={onOpenShortcuts}
-          title="Keyboard Shortcuts"
+          title="Keyboard Shortcuts (?)"
           className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 transition-colors"
         >
           <HelpCircle className="w-4 h-4" />
