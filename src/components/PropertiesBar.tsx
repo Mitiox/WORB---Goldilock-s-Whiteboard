@@ -54,7 +54,6 @@ interface PropertiesBarProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onBringToFront: () => void;
-  onSendToBack: () => void;
   onDeselect: () => void;
   onGroup?: () => void;
   onUngroup?: () => void;
@@ -83,7 +82,6 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
   onDuplicate,
   onDelete,
   onBringToFront,
-  onSendToBack,
   onDeselect,
   onGroup,
   onUngroup,

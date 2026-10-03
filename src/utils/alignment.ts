@@ -1,4 +1,4 @@
-import { WhiteboardElement } from '../types/whiteboard';
+import { BoundingBox, WhiteboardElement } from '../types/whiteboard';
 import { getCombinedBoundingBox, getElementBoundingBox } from './math';
 
 export interface AlignmentGuide {
@@ -15,32 +15,15 @@ export interface SnapResult {
 }
 
 /**
- * Calculates smart snapping guides and offsets when moving selected elements
+ * High-performance snapping using pre-calculated bounding boxes (zero allocations in hot loop)
  */
-export function calculateAlignmentSnap(
-  selectedElements: WhiteboardElement[],
-  allElements: WhiteboardElement[],
+export function calculateAlignmentSnapWithBoxes(
+  selBox: BoundingBox,
+  otherBoxes: BoundingBox[],
   rawDx: number,
   rawDy: number,
   threshold: number = 6
 ): SnapResult {
-  const selBox = getCombinedBoundingBox(selectedElements);
-  if (!selBox) {
-    return { snappedDx: rawDx, snappedDy: rawDy, guides: [] };
-  }
-
-  const selectedIds = new Set(selectedElements.map((e) => e.id));
-  const unselectedElements = allElements.filter((e) => !selectedIds.has(e.id));
-
-  if (unselectedElements.length === 0) {
-    return { snappedDx: rawDx, snappedDy: rawDy, guides: [] };
-  }
-
-  // Pre-calculate target bounding boxes for unselected elements
-  const otherBoxes = unselectedElements
-    .map((el) => getElementBoundingBox(el))
-    .filter(Boolean);
-
   if (otherBoxes.length === 0) {
     return { snappedDx: rawDx, snappedDy: rawDy, guides: [] };
   }
@@ -61,7 +44,8 @@ export function calculateAlignmentSnap(
   let snappedDy = rawDy;
   let horizontalGuide: AlignmentGuide | null = null;
 
-  for (const other of otherBoxes) {
+  for (let i = 0; i < otherBoxes.length; i++) {
+    const other = otherBoxes[i];
     const oLeft = other.minX;
     const oRight = other.maxX;
     const oCenterX = (oLeft + oRight) / 2;
@@ -79,7 +63,8 @@ export function calculateAlignmentSnap(
       { drag: dragCenterX, target: oCenterX, offset: oCenterX - (selBox.minX + selBox.maxX) / 2 },
     ];
 
-    for (const pair of xPairs) {
+    for (let j = 0; j < xPairs.length; j++) {
+      const pair = xPairs[j];
       const diff = Math.abs(pair.drag - pair.target);
       if (diff <= threshold && diff < bestDiffX) {
         bestDiffX = diff;
@@ -104,7 +89,8 @@ export function calculateAlignmentSnap(
       { drag: dragCenterY, target: oCenterY, offset: oCenterY - (selBox.minY + selBox.maxY) / 2 },
     ];
 
-    for (const pair of yPairs) {
+    for (let j = 0; j < yPairs.length; j++) {
+      const pair = yPairs[j];
       const diff = Math.abs(pair.drag - pair.target);
       if (diff <= threshold && diff < bestDiffY) {
         bestDiffY = diff;
@@ -126,4 +112,30 @@ export function calculateAlignmentSnap(
   if (horizontalGuide) guides.push(horizontalGuide);
 
   return { snappedDx, snappedDy, guides };
+}
+
+/**
+ * Calculates smart snapping guides and offsets when moving selected elements
+ */
+export function calculateAlignmentSnap(
+  selectedElements: WhiteboardElement[],
+  allElements: WhiteboardElement[],
+  rawDx: number,
+  rawDy: number,
+  threshold: number = 6
+): SnapResult {
+  const selBox = getCombinedBoundingBox(selectedElements);
+  if (!selBox) {
+    return { snappedDx: rawDx, snappedDy: rawDy, guides: [] };
+  }
+
+  const selectedIds = new Set(selectedElements.map((e) => e.id));
+  const unselectedElements = allElements.filter((e) => !selectedIds.has(e.id));
+
+  if (unselectedElements.length === 0) {
+    return { snappedDx: rawDx, snappedDy: rawDy, guides: [] };
+  }
+
+  const otherBoxes = unselectedElements.map((el) => getElementBoundingBox(el));
+  return calculateAlignmentSnapWithBoxes(selBox, otherBoxes, rawDx, rawDy, threshold);
 }

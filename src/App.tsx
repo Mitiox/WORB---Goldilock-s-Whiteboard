@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   BoundingBox,
   Point,
@@ -16,7 +16,6 @@ import {
   getCombinedBoundingBox,
   getElementBoundingBox,
   getHandleAtPoint,
-  getRotationHandlePosition,
   isElementInBox,
   isElementInLasso,
   isPointInElement,
@@ -214,104 +213,128 @@ export default function App() {
     canvasDimensions,
   ]);
 
-  // Selected elements helper
-  const selectedElements = elements.filter((el) => selectedIds.has(el.id));
+  // Selected elements helper (memoized to prevent recalculations on every render)
+  const selectedElements = useMemo(
+    () => elements.filter((el) => selectedIds.has(el.id)),
+    [elements, selectedIds]
+  );
 
-  const isSelectedText = selectedElements.length > 0 && selectedElements.every((e) => e.type === 'text');
-  const isSelectedNote = selectedElements.length > 0 && selectedElements.every((e) => e.type === 'note');
+  const isSelectedText = useMemo(
+    () => selectedElements.length > 0 && selectedElements.every((e) => e.type === 'text'),
+    [selectedElements]
+  );
+  const isSelectedNote = useMemo(
+    () => selectedElements.length > 0 && selectedElements.every((e) => e.type === 'note'),
+    [selectedElements]
+  );
 
   // Dedicated active tool color - separates Sticky Notes, Text, and Pen
-  const activeToolColor =
-    currentTool === 'note' || isSelectedNote
-      ? noteBgColor
-      : currentTool === 'text' || isSelectedText
-      ? textColor
-      : penColor;
+  const activeToolColor = useMemo(
+    () =>
+      currentTool === 'note' || isSelectedNote
+        ? noteBgColor
+        : currentTool === 'text' || isSelectedText
+        ? textColor
+        : penColor,
+    [currentTool, isSelectedNote, isSelectedText, noteBgColor, textColor, penColor]
+  );
 
-  // Change properties of selected elements with clean tool separation
-  const handlePropColorChange = (newColor: string) => {
-    if (currentTool === 'note' || isSelectedNote) {
-      setNoteBgColor(newColor);
-      if (selectedIds.size > 0) {
-        const updated = elements.map((el) => {
-          if (selectedIds.has(el.id) && el.type === 'note') {
-            return { ...el, color: newColor };
-          }
-          return el;
-        });
-        pushState(updated);
+  // Change properties of selected elements with clean tool separation (memoized handlers)
+  const handlePropColorChange = useCallback(
+    (newColor: string) => {
+      if (currentTool === 'note' || isSelectedNote) {
+        setNoteBgColor(newColor);
+        if (selectedIds.size > 0) {
+          const updated = elements.map((el) => {
+            if (selectedIds.has(el.id) && el.type === 'note') {
+              return { ...el, color: newColor };
+            }
+            return el;
+          });
+          pushState(updated);
+        }
+      } else if (currentTool === 'text' || isSelectedText) {
+        setTextColor(newColor);
+        if (selectedIds.size > 0) {
+          const updated = elements.map((el) => {
+            if (selectedIds.has(el.id) && el.type === 'text') {
+              return { ...el, color: newColor };
+            }
+            return el;
+          });
+          pushState(updated);
+        }
+      } else {
+        setPenColor(newColor);
+        if (selectedIds.size > 0) {
+          const updated = elements.map((el) => {
+            if (!selectedIds.has(el.id)) return el;
+            if (el.type === 'stroke') return { ...el, color: newColor };
+            if (el.type === 'shape') return { ...el, strokeColor: newColor };
+            return el;
+          });
+          pushState(updated);
+        }
       }
-    } else if (currentTool === 'text' || isSelectedText) {
-      setTextColor(newColor);
-      if (selectedIds.size > 0) {
-        const updated = elements.map((el) => {
-          if (selectedIds.has(el.id) && el.type === 'text') {
-            return { ...el, color: newColor };
-          }
-          return el;
-        });
-        pushState(updated);
-      }
-    } else {
-      setPenColor(newColor);
+    },
+    [currentTool, isSelectedNote, isSelectedText, selectedIds, elements, pushState]
+  );
+
+  const handlePropPenSizeChange = useCallback(
+    (newSize: number) => {
+      setPenSize(newSize);
       if (selectedIds.size > 0) {
         const updated = elements.map((el) => {
           if (!selectedIds.has(el.id)) return el;
-          if (el.type === 'stroke') return { ...el, color: newColor };
-          if (el.type === 'shape') return { ...el, strokeColor: newColor };
+          if (el.type === 'stroke') return { ...el, size: newSize };
+          if (el.type === 'shape') return { ...el, strokeWidth: newSize };
           return el;
         });
         pushState(updated);
       }
-    }
-  };
+    },
+    [selectedIds, elements, pushState]
+  );
 
-  const handlePropPenSizeChange = (newSize: number) => {
-    setPenSize(newSize);
-    if (selectedIds.size > 0) {
-      const updated = elements.map((el) => {
-        if (!selectedIds.has(el.id)) return el;
-        if (el.type === 'stroke') return { ...el, size: newSize };
-        if (el.type === 'shape') return { ...el, strokeWidth: newSize };
-        return el;
-      });
-      pushState(updated);
-    }
-  };
+  const handlePropFontSizeChange = useCallback(
+    (newFontSize: number) => {
+      setFontSize(newFontSize);
+      if (selectedIds.size > 0) {
+        const updated = elements.map((el) => {
+          if (!selectedIds.has(el.id)) return el;
+          if (el.type === 'text') {
+            const lines = el.text.split('\n');
+            const maxLen = Math.max(...lines.map((l) => l.length));
+            const estWidth = Math.max(60, maxLen * (newFontSize * 0.6));
+            const estHeight = Math.max(30, lines.length * (newFontSize * 1.35));
+            return { ...el, fontSize: newFontSize, width: estWidth, height: estHeight };
+          }
+          if (el.type === 'note') {
+            return { ...el, fontSize: newFontSize };
+          }
+          return el;
+        });
+        pushState(updated);
+      }
+    },
+    [selectedIds, elements, pushState]
+  );
 
-  const handlePropFontSizeChange = (newFontSize: number) => {
-    setFontSize(newFontSize);
-    if (selectedIds.size > 0) {
-      const updated = elements.map((el) => {
-        if (!selectedIds.has(el.id)) return el;
-        if (el.type === 'text') {
-          const lines = el.text.split('\n');
-          const maxLen = Math.max(...lines.map((l) => l.length));
-          const estWidth = Math.max(60, maxLen * (newFontSize * 0.6));
-          const estHeight = Math.max(30, lines.length * (newFontSize * 1.35));
-          return { ...el, fontSize: newFontSize, width: estWidth, height: estHeight };
-        }
-        if (el.type === 'note') {
-          return { ...el, fontSize: newFontSize };
-        }
-        return el;
-      });
-      pushState(updated);
-    }
-  };
-
-  const handlePropStrokeStyleChange = (newStyle: StrokeStyle) => {
-    setStrokeStyle(newStyle);
-    if (selectedIds.size > 0) {
-      const updated = elements.map((el) => {
-        if (!selectedIds.has(el.id)) return el;
-        if (el.type === 'stroke') return { ...el, strokeStyle: newStyle };
-        if (el.type === 'shape') return { ...el, strokeStyle: newStyle };
-        return el;
-      });
-      pushState(updated);
-    }
-  };
+  const handlePropStrokeStyleChange = useCallback(
+    (newStyle: StrokeStyle) => {
+      setStrokeStyle(newStyle);
+      if (selectedIds.size > 0) {
+        const updated = elements.map((el) => {
+          if (!selectedIds.has(el.id)) return el;
+          if (el.type === 'stroke') return { ...el, strokeStyle: newStyle };
+          if (el.type === 'shape') return { ...el, strokeStyle: newStyle };
+          return el;
+        });
+        pushState(updated);
+      }
+    },
+    [selectedIds, elements, pushState]
+  );
 
   // Grouping helper: Expands any set of element IDs to include their grouped siblings
   const expandSelectionToGroups = useCallback(
@@ -403,7 +426,7 @@ export default function App() {
     pushState(updated);
   }, [elements, selectedIds, pushState]);
 
-  const bringToFront = () => {
+  const bringToFront = useCallback(() => {
     if (selectedIds.size === 0) return;
     const maxZ = Math.max(0, ...elements.map((e) => e.zIndex));
     const updated = elements.map((el) => {
@@ -413,19 +436,7 @@ export default function App() {
       return el;
     });
     pushState(updated);
-  };
-
-  const sendToBack = () => {
-    if (selectedIds.size === 0) return;
-    const minZ = Math.min(0, ...elements.map((e) => e.zIndex));
-    const updated = elements.map((el) => {
-      if (selectedIds.has(el.id)) {
-        return { ...el, zIndex: minZ - 1 };
-      }
-      return el;
-    });
-    pushState(updated);
-  };
+  }, [selectedIds, elements, pushState]);
 
   const handleRotateCW = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -1625,8 +1636,8 @@ export default function App() {
     pushState,
   ]);
 
-  // Export as PNG
-  const handleExportPNG = () => {
+  // Export as PNG (memoized)
+  const handleExportPNG = useCallback(() => {
     const exportCanvas = document.createElement('canvas');
     const ctx = exportCanvas.getContext('2d');
     if (!ctx) return;
@@ -1664,16 +1675,16 @@ export default function App() {
     a.href = url;
     a.download = `whiteboard-${Date.now()}.png`;
     a.click();
-  };
+  }, [elements, canvasDimensions, viewport, isDark]);
 
-  // Export as JSON file
-  const handleExportJSON = () => {
+  // Export as JSON file (memoized)
+  const handleExportJSON = useCallback(() => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(elements, null, 2));
     const a = document.createElement('a');
     a.href = dataStr;
     a.download = `whiteboard-backup-${Date.now()}.json`;
     a.click();
-  };
+  }, [elements]);
 
   const getCanvasCursor = () => {
     if (isSpacePressedRef.current || currentTool === 'pan') return 'grab';
@@ -1729,7 +1740,6 @@ export default function App() {
         onDuplicate={duplicateSelectedElements}
         onDelete={deleteSelectedElements}
         onBringToFront={bringToFront}
-        onSendToBack={sendToBack}
         onDeselect={() => setSelectedIds(new Set())}
         onGroup={handleGroup}
         onUngroup={handleUngroup}

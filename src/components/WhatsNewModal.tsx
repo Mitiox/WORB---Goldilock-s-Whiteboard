@@ -3,7 +3,6 @@ import {
   Sparkles,
   X,
   Keyboard,
-  CheckCircle2,
   ArrowDown,
 } from 'lucide-react';
 
@@ -153,20 +152,16 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({
       isLatest: true,
       items: [
         {
-          feature: '35% Translucent Glassmorphism',
-          description: 'Properties tab and floating toolbar re-engineered with 35% opacity and crisp 6px blur glass styling.',
+          feature: 'Translucent Tab',
+          description: 'Properties tab and floating toolbar now offer blur frosted glass styling across all devices.',
         },
         {
           feature: 'Mobile Phone Group & Ungroup',
-          description: 'Dedicated 1-tap Group (Ctrl+G) and Ungroup (Ctrl+Shift+G) buttons directly inside properties for phone and touch devices.',
+          description: 'Dedicated 1-tap Group (Ctrl+G) and Ungroup (Ctrl+Shift+G) buttons directly inside the properties window for phones and touchscreens.',
         },
         {
           feature: 'Hover & Click Button Tooltips',
           description: 'Live tooltip badges on hover and click/tap across toolbar, shapes, and header buttons.',
-        },
-        {
-          feature: 'Persistent Properties Header',
-          description: 'Selection count ("2 selected") and tool titles stay locked and stable while hovering or clicking action buttons.',
         },
       ],
     },
