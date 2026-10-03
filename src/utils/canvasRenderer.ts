@@ -5,7 +5,7 @@ import {
   Viewport,
   WhiteboardElement,
 } from '../types/whiteboard';
-import { getCombinedBoundingBox, getElementBoundingBox, getHandlePositions } from './math';
+import { getCombinedBoundingBox, getElementBoundingBox, getHandlePositions, getElementCenter } from './math';
 import { AlignmentGuide } from './alignment';
 
 export interface RenderOptions {
@@ -194,9 +194,16 @@ function renderElement(
     ctx.globalAlpha = 0.85;
   }
 
+  if (el.rotation) {
+    const center = getElementCenter(el);
+    ctx.translate(center.x, center.y);
+    ctx.rotate((el.rotation * Math.PI) / 180);
+    ctx.translate(-center.x, -center.y);
+  }
+
   // Hover subtle halo
   if (isHovered) {
-    const box = getElementBoundingBox(el);
+    const box = getElementBoundingBox(el, false);
     ctx.save();
     ctx.strokeStyle = isDark ? 'rgba(99, 102, 241, 0.4)' : 'rgba(79, 70, 229, 0.35)';
     ctx.lineWidth = 1.5;
@@ -443,7 +450,15 @@ function renderSelectionUI(
   isDark: boolean,
   zoom: number
 ) {
-  const box = getCombinedBoundingBox(selectedElements);
+  const isSingle = selectedElements.length === 1;
+  const singleElement = isSingle ? selectedElements[0] : null;
+  const rotationDeg = singleElement ? (singleElement.rotation || 0) : 0;
+
+  // For a single element, use its local unrotated bounding box and rotate the frame
+  const box = isSingle
+    ? getElementBoundingBox(singleElement!, false)
+    : getCombinedBoundingBox(selectedElements);
+
   if (!box) return;
 
   const accentColor = isDark ? '#60a5fa' : '#2563eb';
@@ -460,7 +475,18 @@ function renderSelectionUI(
     height: box.height + pad * 2,
   };
 
+  const midX = selBox.minX + selBox.width / 2;
+  const midY = selBox.minY + selBox.height / 2;
+
   ctx.save();
+
+  // If rotated, rotate the whole selection frame and handles around center
+  if (rotationDeg) {
+    ctx.translate(midX, midY);
+    ctx.rotate((rotationDeg * Math.PI) / 180);
+    ctx.translate(-midX, -midY);
+  }
+
   // 1. Dashed bounding border
   ctx.strokeStyle = accentColor;
   ctx.lineWidth = 1.5 / zoom;
@@ -490,7 +516,50 @@ function renderSelectionUI(
     ctx.stroke();
   }
 
-  // 3. Selection badge if multi-element
+  // 3. Rotation Handle: connecting line from top-center + circular handle knob
+  const rotHandleY = selBox.minY - 24 / zoom;
+  ctx.beginPath();
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 1.5 / zoom;
+  ctx.moveTo(midX, selBox.minY);
+  ctx.lineTo(midX, rotHandleY);
+  ctx.stroke();
+
+  // Rotation Knob
+  const rotRadius = 5.5 / zoom;
+  ctx.beginPath();
+  ctx.arc(midX, rotHandleY, rotRadius, 0, Math.PI * 2);
+  ctx.fillStyle = handleBg;
+  ctx.fill();
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 1.5 / zoom;
+  ctx.stroke();
+
+  // Rotation degree badge
+  if (rotationDeg !== 0) {
+    const degText = `${Math.round(rotationDeg)}°`;
+    ctx.font = `600 ${Math.max(9, 10 / zoom)}px 'JetBrains Mono', monospace`;
+    const textWidth = ctx.measureText(degText).width;
+    const badgeW = textWidth + 8 / zoom;
+    const badgeH = 15 / zoom;
+    const badgeX = midX + 10 / zoom;
+    const badgeY = rotHandleY - badgeH / 2;
+
+    ctx.fillStyle = accentColor;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3 / zoom);
+    } else {
+      ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    }
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(degText, badgeX + 4 / zoom, badgeY + badgeH / 2);
+  }
+
+  // 4. Selection badge if multi-element
   if (selectedElements.length > 1) {
     const badgeText = `${selectedElements.length} items`;
     ctx.font = `600 ${Math.max(10, 11 / zoom)}px 'JetBrains Mono', monospace`;

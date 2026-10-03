@@ -4,6 +4,7 @@ import {
   LassoSelect,
   Pen,
   Highlighter,
+  Eraser,
   Square,
   Circle,
   ArrowRight,
@@ -58,14 +59,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   return (
     <nav 
       aria-label="Drawing Tools"
-      className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-1 p-1.5 rounded-2xl backdrop-blur-md shadow-lg border border-slate-200/90 bg-white/95 dark:border-zinc-800 dark:bg-zinc-900/95 text-slate-700 dark:text-zinc-200 transition-all duration-200"
+      className="fixed sm:absolute bottom-[max(0.75rem,calc(0.5rem+env(safe-area-inset-bottom)))] sm:bottom-6 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center justify-center gap-0.5 sm:gap-1 p-1 sm:p-1.5 rounded-2xl backdrop-blur-md shadow-lg border border-slate-200/90 bg-white/95 dark:border-zinc-800 dark:bg-zinc-900/95 text-slate-700 dark:text-zinc-200 transition-all duration-200 max-w-[calc(100vw-1rem)]"
     >
       {/* ================= GROUP 1: Select & Lasso ================= */}
       {/* 1. Select & Move Tool */}
       <button
         onClick={() => onSelectTool('select')}
         title="Select & Move (1 / V) - Click & drag any element or stroke"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'select'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -79,7 +80,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <button
         onClick={() => onSelectTool('lasso')}
         title="Lasso Select (2 / Q) - Draw a freeform loop to select elements"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'lasso'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -90,14 +91,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </button>
 
       {/* Divider 1 - Clearly visible */}
-      <div className="h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-1 rounded-full opacity-90" />
+      <div className="h-5 sm:h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-0.5 sm:mx-1 rounded-full opacity-90 shrink-0" />
 
-      {/* ================= GROUP 2: Pen, Highlighter, Shape ================= */}
+      {/* ================= GROUP 2: Pen, Highlighter, Eraser, Shape ================= */}
       {/* 3. Freehand Pen */}
       <button
         onClick={() => onSelectTool('pen')}
         title="Pen (3 / P) - Freehand drawing"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'pen'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -111,7 +112,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <button
         onClick={() => onSelectTool('highlighter')}
         title="Highlighter (4 / H) - Semi-transparent emphasis"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'highlighter'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -121,8 +122,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <span className="sr-only">Highlighter (4 / H)</span>
       </button>
 
-      {/* 5. Shapes Selector with Dropdown */}
-      <div className="relative">
+      {/* 5. Eraser Tool */}
+      <button
+        onClick={() => onSelectTool('eraser')}
+        title="Eraser (E) - Erase drawings and elements"
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
+          currentTool === 'eraser'
+            ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
+            : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
+        }`}
+      >
+        <Eraser className="w-4 h-4" />
+        <span className="sr-only">Eraser (E)</span>
+      </button>
+
+      {/* 6. Shapes Selector with Dropdown */}
+      <div className="relative shrink-0">
         <button
           onClick={() => {
             if (!isShapeActive) {
@@ -136,7 +151,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             setIsShapeMenuOpen(true);
           }}
           title={`Shapes (5 / S - Hold 5 to expand, arrows to pick)`}
-          className={`relative flex items-center gap-0.5 p-2.5 rounded-xl transition-all ${
+          className={`relative flex items-center gap-0.5 p-1.5 sm:p-2.5 rounded-xl transition-all ${
             isShapeActive
               ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
               : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -206,14 +221,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       {/* Divider 2 - Clearly visible */}
-      <div className="h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-1 rounded-full opacity-90" />
+      <div className="h-5 sm:h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-0.5 sm:mx-1 rounded-full opacity-90 shrink-0" />
 
       {/* ================= GROUP 3: Text & Sticky Note ================= */}
-      {/* 6. Text Tool */}
+      {/* 7. Text Tool */}
       <button
         onClick={() => onSelectTool('text')}
         title="Text (6 / T) - Click anywhere on canvas to type text"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'text'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -223,11 +238,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <span className="sr-only">Text (6 / T)</span>
       </button>
 
-      {/* 7. Sticky Note */}
+      {/* 8. Sticky Note */}
       <button
         onClick={() => onSelectTool('note')}
         title="Sticky Note (7 / N) - Click anywhere on canvas to place a note"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'note'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'
@@ -238,14 +253,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </button>
 
       {/* Divider 3 - Clearly visible */}
-      <div className="h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-1 rounded-full opacity-90" />
+      <div className="h-5 sm:h-6 w-[1.5px] bg-slate-300 dark:bg-zinc-700 mx-0.5 sm:mx-1 rounded-full opacity-90 shrink-0" />
 
       {/* ================= GROUP 4: Free Hand (Pan) ================= */}
-      {/* 8. Free Hand / Pan Canvas */}
+      {/* 9. Free Hand / Pan Canvas */}
       <button
         onClick={() => onSelectTool('pan')}
         title="Free Hand Pan (8 / M / Space) - Pan canvas freely without moving elements"
-        className={`relative flex items-center justify-center p-2.5 rounded-xl transition-all ${
+        className={`relative flex items-center justify-center p-1.5 sm:p-2.5 rounded-xl shrink-0 transition-all ${
           currentTool === 'pan'
             ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20'
             : 'hover:bg-slate-100 dark:hover:bg-zinc-800/80 text-slate-700 dark:text-zinc-300'

@@ -34,8 +34,9 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
       { key: 'Ctrl + Y', desc: 'Redo' },
       { key: 'Ctrl + D', desc: 'Duplicate selected element' },
       { key: 'Del / Backspace', desc: 'Delete selected element' },
-      { key: 'Double Click', desc: 'Edit text or sticky note' },
-      { key: 'Wheel', desc: 'Zoom in / out' },
+      { key: 'Ctrl + +/- / 0', desc: 'Zoom in, zoom out, reset to 100%' },
+      { key: 'G', desc: 'Cycle grid (Dots / Lines / None)' },
+      { key: 'Rotate Handle', desc: 'Drag top knob to rotate · Shift snaps 15°' },
       { key: 'Esc', desc: 'Deselect / Close menu / Cancel tool' },
     ]},
   ];

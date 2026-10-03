@@ -52,7 +52,24 @@ export function distToSegment(p: Point, v: Point, w: Point): number {
   });
 }
 
-export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
+export function rotatePoint(point: Point, center: Point, angleDeg: number): Point {
+  if (!angleDeg) return point;
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  };
+}
+
+export function getElementBoundingBox(
+  element: WhiteboardElement,
+  accountForRotation: boolean = true
+): BoundingBox {
+  let rawBox: BoundingBox;
   switch (element.type) {
     case 'stroke': {
       if (!element.points || element.points.length === 0) {
@@ -76,7 +93,7 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
       maxX += pad;
       maxY += pad;
 
-      return {
+      rawBox = {
         minX,
         minY,
         maxX,
@@ -84,9 +101,10 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
         width: Math.max(8, maxX - minX),
         height: Math.max(8, maxY - minY),
       };
+      break;
     }
     case 'text': {
-      return {
+      rawBox = {
         minX: element.x,
         minY: element.y,
         maxX: element.x + element.width,
@@ -94,6 +112,7 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
         width: element.width,
         height: element.height,
       };
+      break;
     }
     case 'shape': {
       const minX = Math.min(element.x, element.x + element.width);
@@ -101,7 +120,7 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
       const minY = Math.min(element.y, element.y + element.height);
       const maxY = Math.max(element.y, element.y + element.height);
       const pad = (element.strokeWidth || 2) / 2;
-      return {
+      rawBox = {
         minX: minX - pad,
         minY: minY - pad,
         maxX: maxX + pad,
@@ -109,9 +128,10 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
         width: Math.max(1, maxX - minX + pad * 2),
         height: Math.max(1, maxY - minY + pad * 2),
       };
+      break;
     }
     case 'note': {
-      return {
+      rawBox = {
         minX: element.x,
         minY: element.y,
         maxX: element.x + element.width,
@@ -119,11 +139,49 @@ export function getElementBoundingBox(element: WhiteboardElement): BoundingBox {
         width: element.width,
         height: element.height,
       };
+      break;
     }
   }
+
+  if (accountForRotation && element.rotation) {
+    const cx = rawBox.minX + rawBox.width / 2;
+    const cy = rawBox.minY + rawBox.height / 2;
+    const center: Point = { x: cx, y: cy };
+    const p1 = rotatePoint({ x: rawBox.minX, y: rawBox.minY }, center, element.rotation);
+    const p2 = rotatePoint({ x: rawBox.maxX, y: rawBox.minY }, center, element.rotation);
+    const p3 = rotatePoint({ x: rawBox.maxX, y: rawBox.maxY }, center, element.rotation);
+    const p4 = rotatePoint({ x: rawBox.minX, y: rawBox.maxY }, center, element.rotation);
+
+    const minX = Math.min(p1.x, p2.x, p3.x, p4.x);
+    const maxX = Math.max(p1.x, p2.x, p3.x, p4.x);
+    const minY = Math.min(p1.y, p2.y, p3.y, p4.y);
+    const maxY = Math.max(p1.y, p2.y, p3.y, p4.y);
+
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
+  }
+
+  return rawBox;
 }
 
-export function getCombinedBoundingBox(elements: WhiteboardElement[]): BoundingBox | null {
+export function getElementCenter(element: WhiteboardElement): Point {
+  const box = getElementBoundingBox(element, false);
+  return {
+    x: box.minX + box.width / 2,
+    y: box.minY + box.height / 2,
+  };
+}
+
+export function getCombinedBoundingBox(
+  elements: WhiteboardElement[],
+  accountForRotation: boolean = true
+): BoundingBox | null {
   if (elements.length === 0) return null;
   let minX = Infinity;
   let minY = Infinity;
@@ -131,7 +189,7 @@ export function getCombinedBoundingBox(elements: WhiteboardElement[]): BoundingB
   let maxY = -Infinity;
 
   for (const el of elements) {
-    const box = getElementBoundingBox(el);
+    const box = getElementBoundingBox(el, accountForRotation);
     if (box.minX < minX) minX = box.minX;
     if (box.minY < minY) minY = box.minY;
     if (box.maxX > maxX) maxX = box.maxX;
@@ -155,7 +213,20 @@ export function isPointInElement(
   element: WhiteboardElement,
   tolerance: number = 8
 ): boolean {
-  const box = getElementBoundingBox(element);
+  if (element.rotation) {
+    const center = getElementCenter(element);
+    const localPoint = rotatePoint(point, center, -element.rotation);
+    return isPointInElementUnrotated(localPoint, element, tolerance);
+  }
+  return isPointInElementUnrotated(point, element, tolerance);
+}
+
+function isPointInElementUnrotated(
+  point: Point,
+  element: WhiteboardElement,
+  tolerance: number = 8
+): boolean {
+  const box = getElementBoundingBox(element, false);
   // Quick rejection if outside expanded bbox
   if (
     point.x < box.minX - tolerance ||
@@ -339,12 +410,59 @@ export function getHandlePositions(box: BoundingBox): Record<ResizeHandle, Point
   };
 }
 
+export function getRotatedHandlePositions(
+  box: BoundingBox,
+  rotationDeg?: number
+): Record<ResizeHandle, Point> {
+  const handles = getHandlePositions(box);
+  if (!rotationDeg) return handles;
+  const center: Point = {
+    x: box.minX + box.width / 2,
+    y: box.minY + box.height / 2,
+  };
+  const rotated: Record<ResizeHandle, Point> = {} as Record<ResizeHandle, Point>;
+  for (const key of Object.keys(handles) as ResizeHandle[]) {
+    rotated[key] = rotatePoint(handles[key], center, rotationDeg);
+  }
+  return rotated;
+}
+
+export function getRotationHandlePosition(
+  box: BoundingBox,
+  zoom: number = 1,
+  rotationDeg?: number
+): Point {
+  const midX = box.minX + box.width / 2;
+  const midY = box.minY + box.height / 2;
+  const offsetDistance = 24 / zoom;
+  const handleUnrotated: Point = {
+    x: midX,
+    y: box.minY - offsetDistance,
+  };
+  if (rotationDeg) {
+    return rotatePoint(handleUnrotated, { x: midX, y: midY }, rotationDeg);
+  }
+  return handleUnrotated;
+}
+
+export function isPointInRotationHandle(
+  point: Point,
+  box: BoundingBox,
+  zoom: number = 1,
+  rotationDeg?: number,
+  hitRadius: number = 12
+): boolean {
+  const handlePos = getRotationHandlePosition(box, zoom, rotationDeg);
+  return distance(point, handlePos) <= hitRadius / zoom;
+}
+
 export function getHandleAtPoint(
   point: Point,
   box: BoundingBox,
-  handleRadius: number = 8
+  handleRadius: number = 8,
+  rotationDeg?: number
 ): ResizeHandle | null {
-  const handles = getHandlePositions(box);
+  const handles = getRotatedHandlePositions(box, rotationDeg);
   const handleKeys: ResizeHandle[] = ['nw', 'ne', 'se', 'sw', 'n', 's', 'e', 'w'];
 
   for (const h of handleKeys) {
@@ -354,6 +472,25 @@ export function getHandleAtPoint(
     }
   }
   return null;
+}
+
+export function rotateElement(element: WhiteboardElement, angleDeltaDeg: number): WhiteboardElement {
+  const current = element.rotation || 0;
+  let newRot = Math.round((current + angleDeltaDeg) % 360);
+  if (newRot < 0) newRot += 360;
+  return {
+    ...element,
+    rotation: newRot,
+  };
+}
+
+export function setElementRotation(element: WhiteboardElement, angleDeg: number): WhiteboardElement {
+  let normalized = Math.round(angleDeg % 360);
+  if (normalized < 0) normalized += 360;
+  return {
+    ...element,
+    rotation: normalized,
+  };
 }
 
 export function isPointInPolygon(point: Point, polygon: Point[]): boolean {

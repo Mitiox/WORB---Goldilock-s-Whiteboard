@@ -35,6 +35,7 @@ export interface BaseElement {
   zIndex: number;
   opacity?: number;
   groupId?: string;
+  rotation?: number; // In degrees (-180 to 180 or 0 to 360, default 0)
 }
 
 export interface StrokeElement extends BaseElement {

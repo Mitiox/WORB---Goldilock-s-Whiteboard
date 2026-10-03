@@ -18,6 +18,8 @@ import {
   Hand,
   ChevronUp,
   LassoSelect,
+  RotateCw,
+  RotateCcw,
 } from 'lucide-react';
 import { StrokeStyle, ToolType, WhiteboardElement } from '../types/whiteboard';
 
@@ -52,6 +54,10 @@ interface PropertiesBarProps {
   onBringToFront: () => void;
   onSendToBack: () => void;
   onDeselect: () => void;
+  onRotateCW?: () => void;
+  onRotateCCW?: () => void;
+  onResetRotation?: () => void;
+  currentRotation?: number;
 }
 
 export const PropertiesBar: React.FC<PropertiesBarProps> = ({
@@ -73,16 +79,31 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
   onBringToFront,
   onSendToBack,
   onDeselect,
+  onRotateCW,
+  onRotateCCW,
+  onResetRotation,
+  currentRotation = 0,
 }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMobileScreen, setIsMobileScreen] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [measuredHeight, setMeasuredHeight] = useState<number>(250);
 
   const hasSelection = selectedElements.length > 0;
-  const isExpanded = isHovered || isPinned || hasSelection;
+  // Requirement: Opens ONLY on click - never auto-opens upon selecting elements
+  const isExpanded = isOpen;
 
   const hasTextSelected = selectedElements.some((e) => e.type === 'text');
   const hasNoteSelected = selectedElements.some((e) => e.type === 'note');
@@ -137,43 +158,20 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
     '#f43f5e', // Rose
   ];
 
-  // Smooth hover enter / leave with micro-debounce
-  const handleMouseEnter = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    setIsHovered(true);
-  };
-
-  const handleMouseLeave = () => {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    hoverTimeoutRef.current = setTimeout(() => {
-      setIsHovered(false);
-    }, 180);
-  };
-
-  // Close when clicking outside if pinned
+  // Close when clicking outside if open
   useEffect(() => {
     const handleDocumentClick = (e: MouseEvent) => {
       if (
-        isPinned &&
+        isOpen &&
         containerRef.current &&
         !containerRef.current.contains(e.target as Node)
       ) {
-        setIsPinned(false);
+        setIsOpen(false);
       }
     };
     document.addEventListener('pointerdown', handleDocumentClick);
     return () => document.removeEventListener('pointerdown', handleDocumentClick);
-  }, [isPinned]);
-
-  // Clean up timer on unmount
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    };
-  }, []);
+  }, [isOpen]);
 
   // Helper to get icon of current selected tool / brush
   const getToolIcon = () => {
@@ -206,18 +204,21 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
     }
   };
 
+  const bubbleDimension = isMobileScreen ? 38 : 44;
+  const panelWidth = isMobileScreen
+    ? Math.min(248, typeof window !== 'undefined' ? window.innerWidth - 16 : 248)
+    : 288;
+
   return (
     <div
       ref={containerRef}
-      className="absolute top-16 left-3 z-30 pointer-events-auto"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      className="absolute top-14 sm:top-16 left-2 sm:left-3 z-30 pointer-events-auto"
     >
       <motion.div
         animate={{
-          width: isExpanded ? 288 : 44,
-          height: isExpanded ? measuredHeight : 44,
-          borderRadius: isExpanded ? 16 : 22,
+          width: isExpanded ? panelWidth : bubbleDimension,
+          height: isExpanded ? measuredHeight : bubbleDimension,
+          borderRadius: isExpanded ? 16 : 20,
         }}
         transition={{
           duration: 0.28,
@@ -225,16 +226,16 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
         }}
         onClick={() => {
           if (!isExpanded) {
-            setIsPinned(true);
+            setIsOpen(true);
           }
         }}
-        className={`relative backdrop-blur-md border border-slate-200/80 bg-white/95 dark:border-zinc-800 dark:bg-zinc-900/95 text-slate-800 dark:text-zinc-100 overflow-hidden shadow-lg select-none ${
+        className={`relative backdrop-blur-md border border-slate-200/50 sm:border-slate-200/70 bg-white/60 dark:bg-zinc-900/60 sm:bg-white/80 dark:sm:bg-zinc-900/80 text-slate-800 dark:text-zinc-100 overflow-hidden shadow-lg select-none ${
           !isExpanded ? 'cursor-pointer hover:shadow-md' : 'shadow-xl'
         }`}
       >
         {/* 1. Minimized Circle Icon View - positioned at top-left corner */}
         <div
-          className="absolute top-0 left-0 w-11 h-11 flex items-center justify-center text-slate-700 dark:text-zinc-200 transition-all duration-200 ease-out z-10"
+          className="absolute top-0 left-0 w-[38px] h-[38px] sm:w-11 sm:h-11 flex items-center justify-center text-slate-700 dark:text-zinc-200 transition-all duration-200 ease-out z-10"
           style={{
             opacity: isExpanded ? 0 : 1,
             transform: isExpanded ? 'scale(0.75)' : 'scale(1)',
@@ -248,12 +249,21 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
             style={{ backgroundColor: currentColor }}
             title={`Tool: ${currentTool}, Color: ${currentColor}, Size: ${penSize}px`}
           />
+          {/* Selection indicator badge if items are selected */}
+          {hasSelection && (
+            <span
+              className="absolute -top-0.5 -right-0.5 bg-indigo-600 text-white text-[9px] font-bold min-w-4 h-4 px-1 rounded-full flex items-center justify-center ring-1 ring-white dark:ring-zinc-900 shadow-xs"
+              title={`${selectedElements.length} items selected`}
+            >
+              {selectedElements.length}
+            </span>
+          )}
         </div>
 
         {/* 2. Expanded Content Panel - pre-rendered with smooth fade & translation */}
         <div
           ref={contentRef}
-          className="w-72 p-3 flex flex-col gap-2.5 transition-all duration-200 ease-out"
+          className="w-[248px] sm:w-72 p-2.5 sm:p-3 flex flex-col gap-2 sm:gap-2.5 transition-all duration-200 ease-out"
           style={{
             opacity: isExpanded ? 1 : 0,
             transform: isExpanded ? 'translateY(0)' : 'translateY(8px)',
@@ -296,7 +306,10 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={onDeselect}
+                    onClick={() => {
+                      onDeselect();
+                      setIsOpen(false);
+                    }}
                     title="Deselect (Escape)"
                     className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
                   >
@@ -309,8 +322,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsPinned(false);
-                  setIsHovered(false);
+                  setIsOpen(false);
                 }}
                 title="Minimize to circle"
                 className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200 transition-colors ml-1"
@@ -411,7 +423,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                     key={color}
                     onClick={() => onChangeColor(color)}
                     style={{ backgroundColor: color }}
-                    className={`w-6 h-6 rounded-md border transition-transform ${
+                    className={`w-5 h-5 sm:w-6 sm:h-6 rounded-md border transition-transform ${
                       currentColor.toLowerCase() === color.toLowerCase()
                         ? 'ring-2 ring-indigo-500 scale-110 border-indigo-600'
                         : 'border-black/10 dark:border-white/10 hover:scale-105'
@@ -421,7 +433,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
               </div>
             ) : (
               /* Normal element palette */
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
                 {colorPalette.map((color) => {
                   const isSelected = currentColor.toLowerCase() === color.toLowerCase();
                   return (
@@ -430,7 +442,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                       onClick={() => onChangeColor(color)}
                       style={{ backgroundColor: color }}
                       title={color}
-                      className={`w-6 h-6 rounded-full border transition-transform ${
+                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full border transition-transform ${
                         isSelected
                           ? 'ring-2 ring-offset-1 ring-indigo-500 scale-110 border-white dark:border-zinc-900'
                           : 'border-slate-300 dark:border-zinc-700 hover:scale-105'
@@ -440,7 +452,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                 })}
 
                 {/* Custom Color Input */}
-                <div className="relative w-6 h-6 rounded-full overflow-hidden border border-slate-300 dark:border-zinc-700 hover:scale-105 transition-transform">
+                <div className="relative w-5 h-5 sm:w-6 sm:h-6 rounded-full overflow-hidden border border-slate-300 dark:border-zinc-700 hover:scale-105 transition-transform">
                   <input
                     type="color"
                     value={currentColor}
@@ -480,6 +492,38 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                     {st}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Rotation controls for selected elements */}
+          {hasSelection && onRotateCW && onRotateCCW && (
+            <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-zinc-800 text-xs">
+              <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">
+                Rotate
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onRotateCCW}
+                  title="Rotate 90° Counter-Clockwise"
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={onResetRotation}
+                  title="Click to reset rotation to 0°"
+                  className="px-2 py-0.5 font-mono text-[11px] rounded bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors font-medium cursor-pointer"
+                >
+                  {Math.round(currentRotation)}°
+                </button>
+                <button
+                  onClick={onRotateCW}
+                  title="Rotate 90° Clockwise"
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           )}

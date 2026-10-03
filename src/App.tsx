@@ -16,12 +16,16 @@ import {
   getCombinedBoundingBox,
   getElementBoundingBox,
   getHandleAtPoint,
+  getRotationHandlePosition,
   isElementInBox,
   isElementInLasso,
   isPointInElement,
+  isPointInRotationHandle,
   moveElement,
   resizeElement,
+  rotateElement,
   screenToCanvas,
+  setElementRotation,
 } from './utils/math';
 import { renderWhiteboard } from './utils/canvasRenderer';
 import { useWhiteboardHistory } from './hooks/useWhiteboardHistory';
@@ -121,13 +125,25 @@ export default function App() {
   const key5HoldTimerRef = useRef<NodeJS.Timeout | null>(null);
   const key5IsPressedRef = useRef(false);
   const key5HeldLongEnoughRef = useRef(false);
-  const interactionModeRef = useRef<'none' | 'drawing' | 'moving' | 'resizing' | 'marquee' | 'panning' | 'erasing' | 'lasso'>('none');
+  const interactionModeRef = useRef<
+    'none' | 'drawing' | 'moving' | 'resizing' | 'marquee' | 'panning' | 'erasing' | 'lasso' | 'rotating' | 'two-finger-gesture'
+  >('none');
   const dragStartCanvasPosRef = useRef<Point>({ x: 0, y: 0 });
   const dragStartScreenPosRef = useRef<Point>({ x: 0, y: 0 });
   const activeResizeHandleRef = useRef<ResizeHandle | null>(null);
   const initialElementsSnapshotRef = useRef<WhiteboardElement[]>([]);
   const hasMovedRef = useRef<boolean>(false);
   const erasedAnyRef = useRef<boolean>(false);
+  const rotationCenterRef = useRef<Point>({ x: 0, y: 0 });
+  const initialRotationAngleRef = useRef<number>(0);
+  const initialElementsRotationMapRef = useRef<Map<string, number>>(new Map());
+
+  // Multi-touch tracking for phone & tablet gestures
+  const activePointersRef = useRef<Map<number, Point>>(new Map());
+  const initialPinchDistRef = useRef<number>(0);
+  const initialPinchCenterRef = useRef<Point>({ x: 0, y: 0 });
+  const initialPinchViewportRef = useRef<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const touchGestureActiveRef = useRef<boolean>(false);
 
   // Dynamic canvas sizing with high-DPI support
   const [canvasDimensions, setCanvasDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -411,28 +427,130 @@ export default function App() {
     pushState(updated);
   };
 
-  // Wheel zoom / pan
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.min(4.0, Math.max(0.15, viewport.zoom * zoomFactor));
+  const handleRotateCW = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const updated = elements.map((el) => {
+      if (selectedIds.has(el.id)) {
+        return rotateElement(el, 90);
+      }
+      return el;
+    });
+    pushState(updated);
+  }, [elements, selectedIds, pushState]);
 
-      const mouseCanvas = screenToCanvas(e.clientX, e.clientY, viewport);
-      const newX = e.clientX - mouseCanvas.x * newZoom;
-      const newY = e.clientY - mouseCanvas.y * newZoom;
+  const handleRotateCCW = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const updated = elements.map((el) => {
+      if (selectedIds.has(el.id)) {
+        return rotateElement(el, -90);
+      }
+      return el;
+    });
+    pushState(updated);
+  }, [elements, selectedIds, pushState]);
 
-      setViewport({ x: newX, y: newY, zoom: newZoom });
-    } else {
-      // Pan
-      setViewport((prev) => ({
-        ...prev,
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
-      }));
-    }
-  };
+  const handleResetRotation = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const updated = elements.map((el) => {
+      if (selectedIds.has(el.id)) {
+        return setElementRotation(el, 0);
+      }
+      return el;
+    });
+    pushState(updated);
+  }, [elements, selectedIds, pushState]);
+
+  // Zoom by factor centered at specific screen coordinates
+  const zoomAtPoint = useCallback((factor: number, clientX: number, clientY: number) => {
+    setViewport((prev) => {
+      const newZoom = Math.min(4.0, Math.max(0.15, prev.zoom * factor));
+      if (Math.abs(newZoom - prev.zoom) < 0.0001) return prev;
+
+      const mouseCanvas = screenToCanvas(clientX, clientY, prev);
+      const newX = clientX - mouseCanvas.x * newZoom;
+      const newY = clientY - mouseCanvas.y * newZoom;
+
+      return { x: newX, y: newY, zoom: newZoom };
+    });
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    zoomAtPoint(1.12, window.innerWidth / 2, window.innerHeight / 2);
+  }, [zoomAtPoint]);
+
+  const handleZoomOut = useCallback(() => {
+    zoomAtPoint(1 / 1.12, window.innerWidth / 2, window.innerHeight / 2);
+  }, [zoomAtPoint]);
+
+  // Attach native non-passive wheel and pinch gesture listeners to prevent browser page/UI zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleCanvasWheel = (e: WheelEvent) => {
+      // Must prevent default on non-passive listener so browser does NOT zoom the webpage/UI!
+      e.preventDefault();
+
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        // Trackpad pinch-to-zoom or Ctrl+Wheel
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) delta *= 20; // Line mode
+        else if (e.deltaMode === 2) delta *= 100; // Page mode
+
+        // Calibrated smooth continuous zoom
+        const sensitivity = 0.0015;
+        const clampedDelta = Math.max(-80, Math.min(80, delta));
+        const rawFactor = Math.exp(-clampedDelta * sensitivity);
+        const zoomFactor = Math.min(1.06, Math.max(0.94, rawFactor));
+
+        zoomAtPoint(zoomFactor, e.clientX, e.clientY);
+      } else {
+        // Two-finger pan
+        setViewport((prev) => ({
+          ...prev,
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }));
+      }
+    };
+
+    // Global listener to prevent the whole browser window from zooming if pinch happens outside the canvas
+    const handleGlobalWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        // If event originated outside canvas (e.g. over UI panels), route zoom smoothly to canvas
+        if (e.target !== canvas && !canvas.contains(e.target as Node)) {
+          let delta = e.deltaY;
+          if (e.deltaMode === 1) delta *= 20;
+          else if (e.deltaMode === 2) delta *= 100;
+          const sensitivity = 0.0015;
+          const clampedDelta = Math.max(-80, Math.min(80, delta));
+          const rawFactor = Math.exp(-clampedDelta * sensitivity);
+          const zoomFactor = Math.min(1.06, Math.max(0.94, rawFactor));
+          zoomAtPoint(zoomFactor, e.clientX, e.clientY);
+        }
+      }
+    };
+
+    // Safari gesture events for pinch zoom
+    const handleGesture = (e: Event) => {
+      e.preventDefault();
+    };
+
+    canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    window.addEventListener('wheel', handleGlobalWheel, { passive: false });
+    window.addEventListener('gesturestart', handleGesture, { passive: false });
+    window.addEventListener('gesturechange', handleGesture, { passive: false });
+    window.addEventListener('gestureend', handleGesture, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('wheel', handleCanvasWheel);
+      window.removeEventListener('wheel', handleGlobalWheel);
+      window.removeEventListener('gesturestart', handleGesture);
+      window.removeEventListener('gesturechange', handleGesture);
+      window.removeEventListener('gestureend', handleGesture);
+    };
+  }, [zoomAtPoint]);
 
   // Helper to create and place a new sticky note
   const createStickyNote = (pos?: Point) => {
@@ -444,7 +562,7 @@ export default function App() {
     const noteWidth = 200;
     const noteHeight = 180;
     const color = noteBgColor || '#fef08a';
-    const initialText = 'Sticky note';
+    const initialText = '';
 
     const startX = pos ? Math.round(pos.x) : Math.round(center.x - noteWidth / 2);
     const startY = pos ? Math.round(pos.y) : Math.round(center.y - noteHeight / 2);
@@ -488,11 +606,9 @@ export default function App() {
       viewport
     );
     const currentFontSize = fontSize || 20;
-    const initialText = 'Type text';
-    const lines = initialText.split('\n');
-    const maxLen = Math.max(...lines.map((l) => l.length));
-    const estWidth = Math.max(140, maxLen * (currentFontSize * 0.6) + 24);
-    const estHeight = Math.max(34, lines.length * (currentFontSize * 1.35) + 6);
+    const initialText = '';
+    const estWidth = 160;
+    const estHeight = Math.max(36, Math.round(currentFontSize * 1.5));
     const color = textColor || (isDark ? '#ffffff' : '#000000');
 
     const startX = pos ? Math.round(pos.x) : Math.round(center.x - estWidth / 2);
@@ -531,7 +647,38 @@ export default function App() {
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (editingState) return; // Finish editing first
 
+    // Track active pointer positions
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Multi-touch: 2 fingers -> enter 2-finger pinch-to-zoom & pan gesture mode
+    if (activePointersRef.current.size >= 2) {
+      touchGestureActiveRef.current = true;
+      interactionModeRef.current = 'two-finger-gesture';
+
+      // Discard any draft stroke started by the first finger to avoid stray dots
+      setCurrentDraft(null);
+      setSelectionBox(null);
+      setAlignmentGuides([]);
+
+      const pts = Array.from(activePointersRef.current.values());
+      const p1 = pts[0];
+      const p2 = pts[1];
+      initialPinchDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      initialPinchCenterRef.current = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      initialPinchViewportRef.current = { ...viewport };
+      return;
+    }
+
+    // If a multi-finger touch gesture is already active, ignore single-finger triggers until all lift
+    if (touchGestureActiveRef.current) {
+      return;
+    }
+
     const canvasPoint = screenToCanvas(e.clientX, e.clientY, viewport);
+    const isTouch = e.pointerType === 'touch';
+    const rotTol = isTouch ? 26 : 14;
+    const handleTol = (isTouch ? 24 : 10) / viewport.zoom;
+    const elTol = (isTouch ? 18 : 8) / viewport.zoom;
 
     // 1. Text Tool click: place on canvas, start typing, deselect tool at the same time
     if (currentTool === 'text') {
@@ -569,7 +716,7 @@ export default function App() {
     // 3. Eraser Tool
     if (currentTool === 'eraser') {
       interactionModeRef.current = 'erasing';
-      eraseAtPoint(canvasPoint);
+      eraseAtPoint(canvasPoint, isTouch);
       return;
     }
 
@@ -613,23 +760,61 @@ export default function App() {
 
     // 6. Select & Move Tool
     if (currentTool === 'select') {
-      // A: Check if clicked a resize handle of current selection
-      const selBox = getCombinedBoundingBox(selectedElements);
-      if (selBox) {
-        const handle = getHandleAtPoint(canvasPoint, selBox, 10 / viewport.zoom);
-        if (handle) {
-          interactionModeRef.current = 'resizing';
-          activeResizeHandleRef.current = handle;
-          return;
+      // A: Check if clicked a rotation handle or resize handle of current selection
+      if (selectedElements.length > 0) {
+        const isSingle = selectedElements.length === 1;
+        const singleEl = isSingle ? selectedElements[0] : null;
+        const rot = singleEl ? (singleEl.rotation || 0) : 0;
+        const baseBox = isSingle
+          ? getElementBoundingBox(singleEl!, false)
+          : getCombinedBoundingBox(selectedElements);
+
+        if (baseBox) {
+          const pad = 6;
+          const selBox: BoundingBox = {
+            minX: baseBox.minX - pad,
+            minY: baseBox.minY - pad,
+            maxX: baseBox.maxX + pad,
+            maxY: baseBox.maxY + pad,
+            width: baseBox.width + pad * 2,
+            height: baseBox.height + pad * 2,
+          };
+
+          // Check if clicked rotation knob (touch-tolerant)
+          if (isPointInRotationHandle(canvasPoint, selBox, viewport.zoom, rot, rotTol)) {
+            interactionModeRef.current = 'rotating';
+            const midX = selBox.minX + selBox.width / 2;
+            const midY = selBox.minY + selBox.height / 2;
+            rotationCenterRef.current = { x: midX, y: midY };
+            initialRotationAngleRef.current = Math.atan2(canvasPoint.y - midY, canvasPoint.x - midX);
+
+            const map = new Map<string, number>();
+            selectedElements.forEach((el) => {
+              map.set(el.id, el.rotation || 0);
+            });
+            initialElementsRotationMapRef.current = map;
+            if (canvasRef.current) {
+              canvasRef.current.style.cursor = 'grab';
+            }
+            return;
+          }
+
+          // Check if clicked resize handle (touch-tolerant)
+          const handle = getHandleAtPoint(canvasPoint, selBox, handleTol, rot);
+          if (handle) {
+            interactionModeRef.current = 'resizing';
+            activeResizeHandleRef.current = handle;
+            return;
+          }
         }
       }
 
-      // B: Check if clicked directly on any element
+      // B: Check if clicked directly on any element (touch-tolerant)
       // Check in reverse zIndex (top to bottom)
       const sorted = [...elements].sort((a, b) => b.zIndex - a.zIndex);
       let clickedElement: WhiteboardElement | null = null;
       for (const el of sorted) {
-        if (isPointInElement(canvasPoint, el, 8 / viewport.zoom)) {
+        if (isPointInElement(canvasPoint, el, elTol)) {
           clickedElement = el;
           break;
         }
@@ -681,7 +866,7 @@ export default function App() {
     // 7. Lasso Selection Tool
     if (currentTool === 'lasso') {
       const clickedSelected = selectedElements.find((el) =>
-        isPointInElement(canvasPoint, el, 8 / viewport.zoom)
+        isPointInElement(canvasPoint, el, elTol)
       );
 
       if (clickedSelected) {
@@ -700,18 +885,80 @@ export default function App() {
 
   // Pointer Move
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Handle 2-finger touch pinch-to-zoom & pan on mobile/touchscreen
+    if (activePointersRef.current.size >= 2 && interactionModeRef.current === 'two-finger-gesture') {
+      const pts = Array.from(activePointersRef.current.values());
+      const p1 = pts[0];
+      const p2 = pts[1];
+      const currentDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const currentCenter = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+      if (initialPinchDistRef.current > 0) {
+        const scale = currentDist / initialPinchDistRef.current;
+        const initVp = initialPinchViewportRef.current;
+        const targetZoom = Math.min(4.0, Math.max(0.15, initVp.zoom * scale));
+
+        // Canvas point under the initial pinch center
+        const initialCenterCanvas = screenToCanvas(
+          initialPinchCenterRef.current.x,
+          initialPinchCenterRef.current.y,
+          initVp
+        );
+
+        // Project initial canvas point to current touch midpoint
+        const newX = currentCenter.x - initialCenterCanvas.x * targetZoom;
+        const newY = currentCenter.y - initialCenterCanvas.y * targetZoom;
+
+        setViewport({ x: newX, y: newY, zoom: targetZoom });
+      }
+      return;
+    }
+
+    if (touchGestureActiveRef.current) {
+      return;
+    }
+
     const canvasPoint = screenToCanvas(e.clientX, e.clientY, viewport);
 
     // If pointer NOT pressed, handle cursor & hover states
     if (!isPointerDownRef.current) {
       if (currentTool === 'select') {
-        // Check handle hover
-        const selBox = getCombinedBoundingBox(selectedElements);
-        if (selBox) {
-          const handle = getHandleAtPoint(canvasPoint, selBox, 10 / viewport.zoom);
-          if (handle) {
-            e.currentTarget.style.cursor = `${handle}-resize`;
-            return;
+        // Check handle & rotation hover if elements selected
+        if (selectedElements.length > 0) {
+          const isSingle = selectedElements.length === 1;
+          const singleEl = isSingle ? selectedElements[0] : null;
+          const rot = singleEl ? (singleEl.rotation || 0) : 0;
+          const baseBox = isSingle
+            ? getElementBoundingBox(singleEl!, false)
+            : getCombinedBoundingBox(selectedElements);
+
+          if (baseBox) {
+            const pad = 6;
+            const selBox: BoundingBox = {
+              minX: baseBox.minX - pad,
+              minY: baseBox.minY - pad,
+              maxX: baseBox.maxX + pad,
+              maxY: baseBox.maxY + pad,
+              width: baseBox.width + pad * 2,
+              height: baseBox.height + pad * 2,
+            };
+
+            // Check rotation handle hover
+            if (isPointInRotationHandle(canvasPoint, selBox, viewport.zoom, rot, 14)) {
+              e.currentTarget.style.cursor = 'grab';
+              return;
+            }
+
+            // Check resize handles hover
+            const handle = getHandleAtPoint(canvasPoint, selBox, 10 / viewport.zoom, rot);
+            if (handle) {
+              e.currentTarget.style.cursor = `${handle}-resize`;
+              return;
+            }
           }
         }
 
@@ -752,7 +999,7 @@ export default function App() {
       }
 
       case 'erasing': {
-        eraseAtPoint(canvasPoint);
+        eraseAtPoint(canvasPoint, e.pointerType === 'touch');
         break;
       }
 
@@ -833,6 +1080,35 @@ export default function App() {
         break;
       }
 
+      case 'rotating': {
+        const center = rotationCenterRef.current;
+        const currentAngle = Math.atan2(canvasPoint.y - center.y, canvasPoint.x - center.x);
+        const angleDeltaRad = currentAngle - initialRotationAngleRef.current;
+        const angleDeltaDeg = (angleDeltaRad * 180) / Math.PI;
+
+        const updated = elements.map((el) => {
+          if (selectedIds.has(el.id)) {
+            const startRot = initialElementsRotationMapRef.current.get(el.id) || 0;
+            let newRot = Math.round((startRot + angleDeltaDeg) % 360);
+            if (newRot < 0) newRot += 360;
+
+            // Shift key snaps to 15-degree increments
+            if (e.shiftKey) {
+              newRot = Math.round(newRot / 15) * 15;
+            }
+
+            return {
+              ...el,
+              rotation: newRot,
+            };
+          }
+          return el;
+        });
+
+        setElements(updated);
+        break;
+      }
+
       case 'marquee': {
         const start = dragStartCanvasPosRef.current;
         const minX = Math.min(start.x, canvasPoint.x);
@@ -876,15 +1152,35 @@ export default function App() {
 
   // Pointer Up
   const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e && e.currentTarget && e.pointerId !== undefined) {
-      try {
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-          e.currentTarget.releasePointerCapture(e.pointerId);
+    if (e) {
+      if (e.pointerId !== undefined) {
+        activePointersRef.current.delete(e.pointerId);
+      }
+      if (e.currentTarget && e.pointerId !== undefined) {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        } catch {
+          // Ignore if pointer capture already lost
         }
-      } catch {
-        // Ignore if pointer capture already lost
       }
     }
+
+    // Reset touch gesture flag when all fingers are lifted
+    if (activePointersRef.current.size === 0) {
+      touchGestureActiveRef.current = false;
+    }
+
+    // If we were in a two-finger pinch/pan gesture, don't execute single-finger actions
+    if (interactionModeRef.current === 'two-finger-gesture') {
+      if (activePointersRef.current.size === 0) {
+        interactionModeRef.current = 'none';
+        isPointerDownRef.current = false;
+      }
+      return;
+    }
+
     isPointerDownRef.current = false;
     const mode = interactionModeRef.current;
     interactionModeRef.current = 'none';
@@ -905,8 +1201,8 @@ export default function App() {
       setSelectedIds(new Set());
     }
 
-    // 2. Commit movement or resize to history
-    if ((mode === 'moving' || mode === 'resizing') && hasMovedRef.current) {
+    // 2. Commit movement, resize, or rotation to history
+    if ((mode === 'moving' || mode === 'resizing' || mode === 'rotating') && hasMovedRef.current) {
       pushState(elements);
     }
 
@@ -947,9 +1243,9 @@ export default function App() {
     setLassoPoints(null);
   };
 
-  // Erase helper
-  const eraseAtPoint = (point: Point) => {
-    const tolerance = 12 / viewport.zoom;
+  // Erase helper (touch-aware tolerance)
+  const eraseAtPoint = (point: Point, isTouch = false) => {
+    const tolerance = (isTouch ? 22 : 12) / viewport.zoom;
     const remaining = elements.filter((el) => !isPointInElement(point, el, tolerance));
     if (remaining.length !== elements.length) {
       erasedAnyRef.current = true;
@@ -981,6 +1277,7 @@ export default function App() {
             initialText: el.text,
             fontSize: el.fontSize,
             color: el.color,
+            rotation: el.rotation,
           });
           return;
         } else if (el.type === 'note') {
@@ -995,6 +1292,7 @@ export default function App() {
             bgColor: el.color,
             width: el.width,
             height: el.height,
+            rotation: el.rotation,
           });
           return;
         }
@@ -1070,6 +1368,27 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redo();
+        return;
+      }
+
+      // Zoom In (Ctrl + + / Ctrl + =)
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        handleZoomIn();
+        return;
+      }
+
+      // Zoom Out (Ctrl + - / Ctrl + _)
+      if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_')) {
+        e.preventDefault();
+        handleZoomOut();
+        return;
+      }
+
+      // Reset Zoom (Ctrl + 0)
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        setViewport({ x: 0, y: 0, zoom: 1 });
         return;
       }
 
@@ -1248,6 +1567,11 @@ export default function App() {
         case 'e':
           setCurrentTool('eraser');
           break;
+        case 'g':
+          if (!e.ctrlKey && !e.metaKey) {
+            setGridType((prev) => (prev === 'dots' ? 'grid' : prev === 'grid' ? 'none' : 'dots'));
+          }
+          break;
         case '?':
           setShortcutsModalOpen(true);
           break;
@@ -1377,6 +1701,8 @@ export default function App() {
         }}
         viewport={viewport}
         onResetZoom={() => setViewport({ x: 0, y: 0, zoom: 1 })}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
         onOpenShortcuts={() => setShortcutsModalOpen(true)}
         onOpenWhatsNew={() => setWhatsNewOpen(true)}
         onExportPNG={handleExportPNG}
@@ -1405,12 +1731,15 @@ export default function App() {
         onBringToFront={bringToFront}
         onSendToBack={sendToBack}
         onDeselect={() => setSelectedIds(new Set())}
+        onRotateCW={handleRotateCW}
+        onRotateCCW={handleRotateCCW}
+        onResetRotation={handleResetRotation}
+        currentRotation={selectedElements.length > 0 ? (selectedElements[0].rotation || 0) : 0}
       />
 
       {/* 3. Main High-Performance Canvas */}
       <canvas
         ref={canvasRef}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

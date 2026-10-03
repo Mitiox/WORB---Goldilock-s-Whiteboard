@@ -13,6 +13,7 @@ export interface EditingState {
   bgColor?: string;
   width?: number;
   height?: number;
+  rotation?: number;
 }
 
 interface InlineTextEditorProps {
@@ -31,6 +32,7 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
   onCancel,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mountTimeRef = useRef<number>(Date.now());
   const [text, setText] = React.useState(editingState.initialText);
 
   const isNote = editingState.type === 'note';
@@ -54,12 +56,27 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
   };
 
   useEffect(() => {
+    mountTimeRef.current = Date.now();
     setText(editingState.initialText);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.select();
-      autoResize();
-    }
+
+    const focusEditor = () => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        if (editingState.initialText) {
+          textareaRef.current.select();
+        }
+        autoResize();
+      }
+    };
+
+    focusEditor();
+    const t1 = setTimeout(focusEditor, 40);
+    const t2 = setTimeout(focusEditor, 120);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, [editingState.initialText, editingState.id]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -70,6 +87,15 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
       e.preventDefault();
       onCommit(text);
     }
+  };
+
+  const handleBlur = () => {
+    // If blur fired within 250ms of mounting (from releasing mouse on the click that placed it), re-focus!
+    if (Date.now() - mountTimeRef.current < 250) {
+      textareaRef.current?.focus();
+      return;
+    }
+    onCommit(text);
   };
 
   const scaledFontSize = Math.max(12, editingState.fontSize * viewport.zoom);
@@ -85,12 +111,15 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
       style={{
         left: posX,
         top: posY,
+        transform: editingState.rotation ? `rotate(${editingState.rotation}deg)` : undefined,
+        transformOrigin: 'top left',
       }}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <textarea
         ref={textareaRef}
+        autoFocus
         value={text}
         rows={isNote ? undefined : 1}
         onChange={(e) => {
@@ -98,17 +127,19 @@ export const InlineTextEditor: React.FC<InlineTextEditorProps> = ({
           autoResize();
         }}
         onKeyDown={handleKeyDown}
-        onBlur={() => onCommit(text)}
+        onBlur={handleBlur}
         placeholder={isNote ? 'Type note...' : 'Type text...'}
         className={
           isNote
-            ? 'resize-none border-none outline-none font-[\'Plus_Jakarta_Sans\'] bg-transparent leading-[1.35] p-0 m-0 overflow-y-auto'
+            ? 'resize-none border-none outline-none font-[\'Plus_Jakarta_Sans\'] bg-transparent leading-[1.35] p-0 m-0 pr-1.5 overflow-y-auto sticky-note-scrollbar overscroll-contain box-border'
             : 'resize-none border-2 border-indigo-500/80 dark:border-indigo-400 outline-none font-[\'Plus_Jakarta_Sans\'] bg-white/80 dark:bg-zinc-900/85 backdrop-blur-xs leading-[1.35] px-2.5 py-1 -mx-2.5 -my-1 rounded-lg shadow-sm whitespace-pre overflow-hidden'
         }
         style={{
           width: isNote ? `${noteInnerWidth}px` : undefined,
+          maxWidth: isNote ? `${noteInnerWidth}px` : undefined,
           minWidth: isNote ? `${noteInnerWidth}px` : '140px',
           height: isNote ? `${noteInnerHeight}px` : undefined,
+          maxHeight: isNote ? `${noteInnerHeight}px` : undefined,
           fontSize: `${scaledFontSize}px`,
           color: effectiveTextColor,
         }}
