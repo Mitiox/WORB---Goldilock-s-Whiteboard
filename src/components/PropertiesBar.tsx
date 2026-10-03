@@ -20,6 +20,8 @@ import {
   LassoSelect,
   RotateCw,
   RotateCcw,
+  Group,
+  Ungroup,
 } from 'lucide-react';
 import { StrokeStyle, ToolType, WhiteboardElement } from '../types/whiteboard';
 
@@ -54,6 +56,10 @@ interface PropertiesBarProps {
   onBringToFront: () => void;
   onSendToBack: () => void;
   onDeselect: () => void;
+  onGroup?: () => void;
+  onUngroup?: () => void;
+  canGroup?: boolean;
+  canUngroup?: boolean;
   onRotateCW?: () => void;
   onRotateCCW?: () => void;
   onResetRotation?: () => void;
@@ -79,6 +85,10 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
   onBringToFront,
   onSendToBack,
   onDeselect,
+  onGroup,
+  onUngroup,
+  canGroup = false,
+  canUngroup = false,
   onRotateCW,
   onRotateCCW,
   onResetRotation,
@@ -229,8 +239,13 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
             setIsOpen(true);
           }
         }}
-        className={`relative backdrop-blur-md border border-slate-200/50 sm:border-slate-200/70 bg-white/60 dark:bg-zinc-900/60 sm:bg-white/80 dark:sm:bg-zinc-900/80 text-slate-800 dark:text-zinc-100 overflow-hidden shadow-lg select-none ${
-          !isExpanded ? 'cursor-pointer hover:shadow-md' : 'shadow-xl'
+        style={{
+          backgroundColor: isDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.35)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+        className={`relative border border-white/40 dark:border-white/10 text-slate-800 dark:text-zinc-100 overflow-hidden shadow-2xl select-none ${
+          !isExpanded ? 'cursor-pointer hover:shadow-md' : 'shadow-2xl'
         }`}
       >
         {/* 1. Minimized Circle Icon View - positioned at top-left corner */}
@@ -270,38 +285,62 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
             pointerEvents: isExpanded ? 'auto' : 'none',
           }}
         >
-          {/* Header Bar */}
-          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 dark:border-zinc-800 text-xs">
+          {/* Header Bar - Title NEVER changes while hovering/clicking buttons */}
+          <div className="flex items-center justify-between pb-1.5 border-b border-black/10 dark:border-white/10 text-xs">
             <div className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-zinc-200 capitalize">
               <span className="text-indigo-600 dark:text-indigo-400">{getToolIcon()}</span>
-              <span>
+              <span className="font-semibold text-slate-800 dark:text-zinc-100">
                 {hasSelection
                   ? `${selectedElements.length} selected`
                   : `${currentTool} settings`}
               </span>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5 sm:gap-1">
               {hasSelection && (
                 <>
+                  {/* Group Button for Phone & Desktop */}
+                  {canGroup && onGroup && (
+                    <button
+                      onClick={onGroup}
+                      title="Group elements (Ctrl+G)"
+                      className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-indigo-600 dark:text-indigo-400 transition-colors"
+                    >
+                      <Group className="w-3.5 h-3.5" />
+                      <span className="sr-only">Group</span>
+                    </button>
+                  )}
+
+                  {/* Ungroup Button for Phone & Desktop */}
+                  {canUngroup && onUngroup && (
+                    <button
+                      onClick={onUngroup}
+                      title="Ungroup elements (Ctrl+Shift+G)"
+                      className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-amber-600 dark:text-amber-400 transition-colors"
+                    >
+                      <Ungroup className="w-3.5 h-3.5" />
+                      <span className="sr-only">Ungroup</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={onDuplicate}
                     title="Duplicate (Ctrl+D)"
-                    className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                    className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={onBringToFront}
                     title="Bring to Front"
-                    className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                    className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 transition-colors"
                   >
                     <Layers className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={onDelete}
                     title="Delete (Backspace / Del)"
-                    className="p-1 rounded-md hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 text-slate-600 dark:text-zinc-300 transition-colors"
+                    className="p-1 rounded-md hover:bg-red-500/20 text-red-600 dark:text-red-400 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -311,7 +350,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                       setIsOpen(false);
                     }}
                     title="Deselect (Escape)"
-                    className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
+                    className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -325,7 +364,7 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                   setIsOpen(false);
                 }}
                 title="Minimize to circle"
-                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200 transition-colors ml-1"
+                className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200 transition-colors ml-0.5"
               >
                 <ChevronUp className="w-3.5 h-3.5" />
               </button>
@@ -506,21 +545,21 @@ export const PropertiesBar: React.FC<PropertiesBarProps> = ({
                 <button
                   onClick={onRotateCCW}
                   title="Rotate 90° Counter-Clockwise"
-                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                  className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={onResetRotation}
+                  onClick={() => onResetRotation?.()}
                   title="Click to reset rotation to 0°"
-                  className="px-2 py-0.5 font-mono text-[11px] rounded bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors font-medium cursor-pointer"
+                  className="px-2 py-0.5 font-mono text-[11px] rounded bg-white/30 dark:bg-white/10 hover:bg-white/50 dark:hover:bg-white/20 text-slate-700 dark:text-zinc-300 transition-colors font-medium cursor-pointer"
                 >
                   {Math.round(currentRotation)}°
                 </button>
                 <button
                   onClick={onRotateCW}
                   title="Rotate 90° Clockwise"
-                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
+                  className="p-1 rounded-md hover:bg-white/40 dark:hover:bg-white/10 text-slate-600 dark:text-zinc-300 transition-colors"
                 >
                   <RotateCw className="w-3.5 h-3.5" />
                 </button>

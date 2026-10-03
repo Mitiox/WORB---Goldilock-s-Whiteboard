@@ -1731,6 +1731,10 @@ export default function App() {
         onBringToFront={bringToFront}
         onSendToBack={sendToBack}
         onDeselect={() => setSelectedIds(new Set())}
+        onGroup={handleGroup}
+        onUngroup={handleUngroup}
+        canGroup={selectedIds.size >= 2}
+        canUngroup={selectedElements.some((el) => Boolean(el.groupId))}
         onRotateCW={handleRotateCW}
         onRotateCCW={handleRotateCCW}
         onResetRotation={handleResetRotation}
@@ -1782,6 +1786,7 @@ export default function App() {
         setIsShapeMenuOpen={setIsShapeMenuOpen}
         highlightedShapeIndex={highlightedShapeIndex}
         setHighlightedShapeIndex={setHighlightedShapeIndex}
+        isDark={isDark}
       />
 
       {/* 6. Helpful Quick Status Bar at bottom right */}

@@ -7,7 +7,7 @@ import {
   ArrowDown,
 } from 'lucide-react';
 
-export const CURRENT_APP_VERSION = '1.3.5';
+export const CURRENT_APP_VERSION = '2';
 
 interface ReleaseUpdate {
   version: string;
@@ -131,8 +131,7 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({
     },
     {
       version: '1.3.5',
-      date: 'Latest Release',
-      isLatest: true,
+      date: 'Element Rotation & Vector Branding',
       items: [
         {
           feature: 'Full Vector Element Rotation',
@@ -145,6 +144,29 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({
         {
           feature: 'Streamlined Header Actions',
           description: 'What\'s New button shrunk to a clean sparkle icon button matching toolbar design.',
+        },
+      ],
+    },
+    {
+      version: '2',
+      date: 'Latest Release (v2)',
+      isLatest: true,
+      items: [
+        {
+          feature: '35% Translucent Glassmorphism',
+          description: 'Properties tab and floating toolbar re-engineered with 35% opacity and crisp 6px blur glass styling.',
+        },
+        {
+          feature: 'Mobile Phone Group & Ungroup',
+          description: 'Dedicated 1-tap Group (Ctrl+G) and Ungroup (Ctrl+Shift+G) buttons directly inside properties for phone and touch devices.',
+        },
+        {
+          feature: 'Hover & Click Button Tooltips',
+          description: 'Live tooltip badges on hover and click/tap across toolbar, shapes, and header buttons.',
+        },
+        {
+          feature: 'Persistent Properties Header',
+          description: 'Selection count ("2 selected") and tool titles stay locked and stable while hovering or clicking action buttons.',
         },
       ],
     },

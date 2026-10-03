@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Undo2,
   Redo2,
@@ -60,9 +60,38 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 }) => {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const tooltipTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showTooltip = (name: string) => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setActiveTooltip(name);
+  };
+
+  const hideTooltip = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => {
+      setActiveTooltip(null);
+    }, 200);
+  };
+
+  const triggerClickTooltip = (name: string) => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setActiveTooltip(name);
+    tooltipTimerRef.current = setTimeout(() => {
+      setActiveTooltip(null);
+    }, 1800);
+  };
 
   return (
     <header className="absolute top-2 sm:top-3 left-2 sm:left-3 right-2 sm:right-3 z-30 pointer-events-none flex items-center justify-between">
+      {/* Tooltip Badge on hover & click/touch */}
+      {activeTooltip && (
+        <div className="absolute top-12 sm:top-14 left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap bg-slate-900/90 dark:bg-zinc-800/95 text-white text-[11px] sm:text-xs font-medium px-2.5 py-1 rounded-full shadow-lg backdrop-blur-md border border-white/10 animate-in fade-in zoom-in-95 duration-150">
+          {activeTooltip}
+        </div>
+      )}
+
       {/* Left zone: Brand & History controls */}
       <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 p-1 sm:p-1.5 rounded-xl backdrop-blur-md transition-colors shadow-sm border border-slate-200/70 bg-white/90 dark:border-zinc-800/80 dark:bg-zinc-900/90 text-slate-800 dark:text-zinc-100">
         <div className="flex items-center px-1 sm:px-1.5 py-0.5">
@@ -77,7 +106,14 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Undo button */}
         <button
-          onClick={onUndo}
+          onClick={() => {
+            if (canUndo) {
+              onUndo();
+              triggerClickTooltip('Undo (Ctrl+Z)');
+            }
+          }}
+          onMouseEnter={() => showTooltip('Undo (Ctrl+Z)')}
+          onMouseLeave={hideTooltip}
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
           className={`p-1 sm:p-1.5 rounded-lg transition-colors flex items-center justify-center ${
@@ -91,7 +127,14 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Redo button */}
         <button
-          onClick={onRedo}
+          onClick={() => {
+            if (canRedo) {
+              onRedo();
+              triggerClickTooltip('Redo (Ctrl+Y)');
+            }
+          }}
+          onMouseEnter={() => showTooltip('Redo (Ctrl+Y)')}
+          onMouseLeave={hideTooltip}
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
           className={`p-1 sm:p-1.5 rounded-lg transition-colors flex items-center justify-center ${
@@ -125,7 +168,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         <div className="flex items-center gap-0.5">
           {onZoomOut && (
             <button
-              onClick={onZoomOut}
+              onClick={() => {
+                onZoomOut();
+                triggerClickTooltip('Zoom Out (Ctrl -)');
+              }}
+              onMouseEnter={() => showTooltip('Zoom Out (Ctrl -)')}
+              onMouseLeave={hideTooltip}
               title="Zoom Out (Ctrl + -)"
               className="hidden sm:flex p-1 rounded-md text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
             >
@@ -133,7 +181,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </button>
           )}
           <button
-            onClick={onResetZoom}
+            onClick={() => {
+              onResetZoom();
+              triggerClickTooltip('Reset Zoom to 100% (Ctrl 0)');
+            }}
+            onMouseEnter={() => showTooltip('Reset Zoom to 100% (Ctrl 0)')}
+            onMouseLeave={hideTooltip}
             title="Reset Zoom to 100% (Ctrl + 0)"
             className="px-1.5 py-0.5 text-xs font-mono font-medium rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
           >
@@ -141,7 +194,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           </button>
           {onZoomIn && (
             <button
-              onClick={onZoomIn}
+              onClick={() => {
+                onZoomIn();
+                triggerClickTooltip('Zoom In (Ctrl +)');
+              }}
+              onMouseEnter={() => showTooltip('Zoom In (Ctrl +)')}
+              onMouseLeave={hideTooltip}
               title="Zoom In (Ctrl + +)"
               className="hidden sm:flex p-1 rounded-md text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
             >
@@ -152,7 +210,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Grid toggle */}
         <button
-          onClick={onCycleGrid}
+          onClick={() => {
+            onCycleGrid();
+            triggerClickTooltip(`Grid: ${gridType === 'dots' ? 'Lines' : gridType === 'grid' ? 'None' : 'Dots'} (G)`);
+          }}
+          onMouseEnter={() => showTooltip(`Grid: ${gridType} (G)`)}
+          onMouseLeave={hideTooltip}
           title={`Grid style: ${gridType}`}
           className={`p-1 sm:p-1.5 rounded-lg transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
             gridType !== 'none' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-zinc-400'
@@ -163,7 +226,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Theme toggle */}
         <button
-          onClick={onToggleTheme}
+          onClick={() => {
+            onToggleTheme();
+            triggerClickTooltip(isDark ? 'Switched to Light Mode' : 'Switched to Dark Mode');
+          }}
+          onMouseEnter={() => showTooltip(isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode')}
+          onMouseLeave={hideTooltip}
           title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           className="p-1 sm:p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors"
         >
@@ -173,7 +241,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         {/* Export Dropdown */}
         <div className="relative">
           <button
-            onClick={() => setShowExportMenu(!showExportMenu)}
+            onClick={() => {
+              setShowExportMenu(!showExportMenu);
+              triggerClickTooltip('Export Options');
+            }}
+            onMouseEnter={() => showTooltip('Export whiteboard')}
+            onMouseLeave={hideTooltip}
             title="Export whiteboard"
             className="p-1 sm:p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-300 transition-colors flex items-center gap-1"
           >
@@ -189,6 +262,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 onClick={() => {
                   onExportPNG();
                   setShowExportMenu(false);
+                  triggerClickTooltip('Exported PNG');
                 }}
                 className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2"
               >
@@ -199,6 +273,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 onClick={() => {
                   onExportJSON();
                   setShowExportMenu(false);
+                  triggerClickTooltip('Saved .json file');
                 }}
                 className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2"
               >
@@ -218,6 +293,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 onClick={() => {
                   onClear();
                   setShowClearConfirm(false);
+                  triggerClickTooltip('Canvas Cleared');
                 }}
                 className="px-2 py-0.5 text-[11px] bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
               >
@@ -232,7 +308,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </div>
           ) : (
             <button
-              onClick={() => setShowClearConfirm(true)}
+              onClick={() => {
+                setShowClearConfirm(true);
+                triggerClickTooltip('Clear Canvas');
+              }}
+              onMouseEnter={() => showTooltip('Clear Canvas')}
+              onMouseLeave={hideTooltip}
               title="Clear Canvas"
               className="p-1 sm:p-1.5 rounded-lg hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400 text-slate-500 dark:text-zinc-400 transition-colors"
             >
@@ -241,10 +322,15 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           )}
         </div>
 
-        {/* What's New button (icon only) */}
+        {/* What's New button */}
         {onOpenWhatsNew && (
           <button
-            onClick={onOpenWhatsNew}
+            onClick={() => {
+              onOpenWhatsNew();
+              triggerClickTooltip("What's New");
+            }}
+            onMouseEnter={() => showTooltip("What's New")}
+            onMouseLeave={hideTooltip}
             title="What's New in this version"
             className="p-1 sm:p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-indigo-600 dark:text-indigo-400 transition-colors"
           >
@@ -254,7 +340,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Shortcuts button */}
         <button
-          onClick={onOpenShortcuts}
+          onClick={() => {
+            onOpenShortcuts();
+            triggerClickTooltip('Keyboard Shortcuts (?)');
+          }}
+          onMouseEnter={() => showTooltip('Keyboard Shortcuts (?)')}
+          onMouseLeave={hideTooltip}
           title="Keyboard Shortcuts (?)"
           className="p-1 sm:p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-500 dark:text-zinc-400 transition-colors"
         >
